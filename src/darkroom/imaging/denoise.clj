@@ -1,8 +1,12 @@
 (ns darkroom.imaging.denoise
   "Offline, CPU-only noise reduction using OpenCV's non-local means
-  (via the Bytedeco JavaCPP preset; no cloud API, no GPU runtime).
+  (via the Bytedeco JavaCPP preset; no cloud API, no GPU runtime), run on
+  16-bit data so RAW-grade gradients are not quantised to 8 bits first.
   Pure logic, no UI dependency."
-  (:import (org.bytedeco.opencv.global opencv_core opencv_photo)
+  (:require [darkroom.imaging.core :as core]
+            [darkroom.imaging.scene :as scene])
+  (:import (org.bytedeco.javacpp ShortPointer)
+           (org.bytedeco.opencv.global opencv_core opencv_photo)
            (org.bytedeco.opencv.opencv_core Mat)))
 
 (set! *unchecked-math* :warn-on-boxed)
@@ -14,58 +18,73 @@
 
 (def quality-params
   "NLM window sizes (both odd) per quality tier. Cost grows with the search
-  window, quality with it too. Measured on a 1600x1067 noisy image, 4 cores:
-  :draft ~320 ms / 29.9 dB PSNR, :preview ~620 ms / 31.9 dB, :final is OpenCV's
-  recommended 7/21 for full-resolution export."
+  window, quality with it too. :final is OpenCV's recommended 7/21 for
+  full-resolution export."
   {:draft   {:template 5 :search 7}
    :preview {:template 5 :search 11}
    :final   {:template 7 :search 21}})
 
-(defn- ->mat
-  "Image map -> 8-bit BGR Mat (alpha is dropped; see `denoise`)."
-  ^Mat [{:keys [^long width ^long height pixels]}]
-  (let [^ints src pixels
-        n (alength src)
-        ^bytes bgr (byte-array (* 3 n))]
-    (dotimes [i n]
-      (let [p (aget src i) j (* 3 i)]
-        (aset bgr j       (unchecked-byte p))
-        (aset bgr (+ j 1) (unchecked-byte (unsigned-bit-shift-right p 8)))
-        (aset bgr (+ j 2) (unchecked-byte (unsigned-bit-shift-right p 16)))))
-    (let [m (Mat. (int height) (int width) opencv_core/CV_8UC3)]
-      (.put (.data m) bgr)
+(def ^:private ^:const h-per-strength
+  "Strength 0-100 -> NLM filter strength `h` in 16-bit units: 100 is h = 6000,
+  about 9% of full scale. (OpenCV's 16-bit path only supports the L1 norm, whose
+  `h` has a different scale from the 8-bit colour variant; this value was
+  calibrated on noisy test images, see denoise-test.)"
+  60.0)
+
+(defn- ->mat16
+  "Scene image -> 16-bit 3-channel Mat of the sRGB-encoded values (noise is
+  most uniform there). Over-range and out-of-gamut values are clamped; the
+  caller keeps the originals of those."
+  ^Mat [{:keys [^long width ^long height data]}]
+  (let [^floats src data
+        ^shorts px (short-array (alength src))
+        ^doubles enc (scene/encode-lut :srgb)]
+    (core/parallel-ranges!
+      (alength src)
+      (fn [^long start ^long end]
+        (loop [i start]
+          (when (< i end)
+            (aset px i (unchecked-short (Math/rint (* 65535.0 (scene/lut-at enc (aget src i))))))
+            (recur (inc i))))))
+    (let [m (Mat. (int height) (int width) opencv_core/CV_16UC3)]
+      (.put (ShortPointer. (.data m)) px)
       m)))
 
 (defn denoise
-  "Reduces colour and luminance noise. `strength` is 0 (off) to 100 (strongest).
-  Options: :quality is :draft (fastest, while dragging a slider), :preview
-  (default) or :final (slowest, for export). Alpha is preserved.
-  Returns a new image map; the input is not modified."
-  [{:keys [width height pixels] :as img} strength & [{:keys [quality]}]]
+  "Reduces colour and luminance noise in a scene image. `strength` is 0 (off)
+  to 100 (strongest). Options: :quality is :draft (fastest, while dragging a
+  slider), :preview (default) or :final (slowest, for export). Channel values
+  outside [0, 1] (headroom, out of gamut) are left as they were. Returns a new
+  image; the input is not modified."
+  [{:keys [width height data] :as img} strength & [{:keys [quality]}]]
   (if (<= (double strength) 0.0)
     img
     (do
       @threads-configured
       (let [{:keys [template search]} (quality-params (or quality :preview))
-            ;; Strength 0-100 -> NLM `h` 0-15 (OpenCV suggests ~3-10 for typical noise).
-            h   (float (* 0.15 (double strength)))
-            src (->mat img)
+            h   (float (* h-per-strength (double strength)))
+            src (->mat16 img)
             dst (Mat.)]
         (try
-          (opencv_photo/fastNlMeansDenoisingColored src dst h h (int template) (int search))
-          (let [^ints in pixels
+          (opencv_photo/fastNlMeansDenoising src dst (float-array [h h h]) (int template) (int search)
+                                             opencv_core/NORM_L1)
+          (let [^floats in data
                 n (alength in)
-                ^bytes bgr (byte-array (* 3 n))
-                ^ints out (int-array n)]
-            (.get (.data dst) bgr)
-            (dotimes [i n]
-              (let [j (* 3 i)
-                    b (bit-and (aget bgr j) 0xFF)
-                    g (bit-and (aget bgr (+ j 1)) 0xFF)
-                    r (bit-and (aget bgr (+ j 2)) 0xFF)]
-                (aset out i (unchecked-int (bit-or (bit-and (aget in i) 0xFF000000)
-                                                   (bit-shift-left r 16) (bit-shift-left g 8) b)))))
-            {:width width :height height :pixels out})
+                ^shorts den (short-array n)
+                ^floats out (float-array n)
+                ^doubles dlut scene/srgb-decode-lut]
+            (.get (ShortPointer. (.data dst)) den)
+            (core/parallel-ranges!
+              n
+              (fn [^long start ^long end]
+                (loop [i start]
+                  (when (< i end)
+                    (let [v (double (aget in i))]
+                      (aset out i (if (and (>= v 0.0) (<= v 1.0))
+                                    (float (scene/lut-at dlut (/ (double (bit-and (aget den i) 0xFFFF)) 65535.0)))
+                                    (float v))))
+                    (recur (inc i))))))
+            (scene/image width height out))
           (finally (.close src) (.close dst)))))))
 
 (defn warm-up!
@@ -74,6 +93,6 @@
   background thread, repeatedly, and when OpenCV is unavailable (returns false)."
   []
   (try
-    (denoise {:width 16 :height 16 :pixels (int-array 256 (unchecked-int 0xFF808080))} 50 {:quality :draft})
+    (denoise (scene/image 16 16 (float-array (* 3 256) 0.2)) 50 {:quality :draft})
     true
     (catch Throwable _ false)))

@@ -12,7 +12,7 @@
     :tsz       library thumbnail size 120-360
     :before    true while showing the unedited image
     :exporting export overlay open?
-    :fmt :size :q :export-dir   export options
+    :fmt :size :q :cspace :export-dir   export options (cspace: :srgb :display-p3 :adobe-rgb)
     :adding / :toast            transient UI"
   (:require [clojure.java.io :as io]
             [darkroom.catalog :as cat]
@@ -22,7 +22,7 @@
 
 (defonce state
   (atom {:catalog cat/empty-catalog :view :library :shoot nil :cur nil :tab :basic
-         :lf :all :tsz 220 :before false :exporting false :fmt :jpeg :size 2048 :q 90
+         :lf :all :tsz 220 :before false :exporting false :fmt :jpeg :size 2048 :q 90 :cspace :srgb
          :export-dir nil :adding false :toast nil}))
 
 ;; ------------------------------------------------------------- derivations

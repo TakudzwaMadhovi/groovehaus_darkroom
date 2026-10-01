@@ -45,8 +45,10 @@
   :main darkroom.main
   :resource-paths ["resources"]
   ;; headless AWT: ImageIO needs no Cocoa/AWT event loop, which can conflict
-  ;; with JavaFX on macOS. Heap capped for 8 GB machines.
-  :jvm-opts ["-Djava.awt.headless=true" "-Xmx2g"]
+  ;; with JavaFX on macOS. The float pipeline holds 12 bytes per pixel per image
+  ;; (a 45 MP export needs about 1.7 GB), so the heap scales with the machine
+  ;; instead of a fixed cap.
+  :jvm-opts ["-Djava.awt.headless=true" "-XX:MaxRAMPercentage=60"]
   :global-vars {*warn-on-reflection* true}
   :profiles {:uberjar {:aot :all}
              ;; test helpers use plain interop for brevity

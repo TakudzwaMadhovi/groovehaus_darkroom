@@ -27,6 +27,7 @@
            [:highlights "HIGHLIGHTS" -1 1 0.01 {:pct? true}]
            [:shadows "SHADOWS" -1 1 0.01 {:pct? true}]
            [:temp "TEMPERATURE" -1 1 0.01 {:pct? true}]
+           [:tint "TINT" -1 1 0.01 {:pct? true}]
            [:saturation "SATURATION" -1 1 0.01 {:pct? true}]
            [:denoise "DENOISE" 0 100 1 {:decimals 0}]]
    :look  [[:bw "BLACK & WHITE" 0 1 0.01 {:pct? true}]

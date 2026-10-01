@@ -8,7 +8,8 @@
   unsigned 16-bit value (read it with (bit-and s 0xFFFF)) proportional to
   scene light: gamma 1.0, sRGB/Rec. 709 primaries, camera white balance
   applied, no automatic brightening."
-  (:require [darkroom.imaging.core :as core])
+  (:require [darkroom.imaging.core :as core]
+            [darkroom.imaging.scene :as scene])
   (:import (java.io ByteArrayInputStream)
            (java.nio ByteOrder)
            (javax.imageio ImageIO)
@@ -36,12 +37,12 @@
     (throw (ex-info (str what ": " (.getString (LibRaw/libraw_strerror (int rc))))
                     {:path (str path) :libraw-code rc}))))
 
-(defn- configure! [^libraw_output_params_t p {:keys [quality half-size?]}]
+(defn- configure! [^libraw_output_params_t p {:keys [quality half-size? output-color]}]
   (doto p
     (.gamm 0 1.0)               ; gamma 1.0 = linear light
     (.gamm 1 1.0)               ; no toe slope
     (.output_bps 16)
-    (.output_color 1)           ; sRGB / Rec. 709 primaries
+    (.output_color (int (or output-color 1))) ; 1 = sRGB / Rec. 709 primaries
     (.no_auto_bright 1)         ; keep scene-referred values
     (.use_camera_wb 1)
     (.user_qual (int (or quality 3))) ; 3 = AHD demosaic
@@ -106,6 +107,13 @@
             b (aget lut (bit-and (aget src (+ j 2)) 0xFFFF))]
         (aset out i (unchecked-int (bit-or 0xFF000000 (bit-shift-left r 16) (bit-shift-left g 8) b)))))
     {:width width :height height :pixels out}))
+
+(defn load-scene
+  "RAW file -> float scene image in the working colour space (LibRaw output
+  colour 4, 16-bit linear, camera white balance). This is what the editor
+  works on; nothing is quantised to 8 bits."
+  [path & [opts]]
+  (scene/from-linear16 (decode-linear path (assoc opts :output-color 4))))
 
 (defn load-image
   "RAW file -> display image map (decode, then sRGB-encode)."

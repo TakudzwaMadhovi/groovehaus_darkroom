@@ -2,7 +2,9 @@
   "Export overlay: format, long edge, JPEG quality, destination folder. Renders
   the full-resolution original through the same pipeline as the preview."
   (:require [darkroom.catalog :as cat]
+            [darkroom.imaging.color :as color]
             [darkroom.imaging.develop :as develop]
+            [darkroom.imaging.exif :as exif]
             [darkroom.imaging.export :as export]
             [darkroom.imaging.loader :as loader]
             [darkroom.imaging.pipeline :as pipeline]
@@ -45,15 +47,16 @@
   (let [path (:cur s)
         adj  (cat/adj (:catalog s) path)
         dir  (start-dir s)
-        fmt  (:fmt s) size (:size s) q (:q s)]
+        fmt  (:fmt s) size (:size s) q (:q s) space (:cspace s)]
     (.execute worker
               (fn []
                 (try
-                  (let [full (loader/load-image path)
+                  (let [full (loader/load-scene path)
                         out  (-> (pipeline/render full adj {:quality :final})
                                  (develop/resize-long-edge (when (pos? size) size)))
                         name (target-name dir (base-name path) fmt)
-                        f    (export/save! out {:dir dir :name name :format fmt :quality (/ q 100.0)})]
+                        f    (export/save-scene! out {:dir dir :name name :format fmt :quality (/ q 100.0)
+                                                      :space space :tags (exif/read-tags path)})]
                     (Platform/runLater #(on-done f)))
                   (catch Throwable t
                     (Platform/runLater #(on-error t))))))))
@@ -65,6 +68,7 @@
         title    (doto (w/label "" "display") (.setStyle "-fx-font-size: 56px;"))
         fmt-box  (w/vbox 8)
         size-box (w/vbox 8)
+        space-box (w/vbox 8)
         q-row    (w/slider-row {:label "QUALITY" :min 50 :max 100 :step 1 :value 90 :default 90 :decimals 0
                                 :on-input (fn [v] (swap! st/state assoc :q (long v)))})
         dir-lbl  (doto (w/label "" "editorial") (.setWrapText true) (.setStyle "-fx-font-size: 17px;"))
@@ -105,6 +109,7 @@
             (w/vbox 8 eyebrow title)
             (w/vbox 8 (w/tlabel "FORMAT" :normal "sys" "dim") fmt-box)
             (w/vbox 8 (w/tlabel "LONG EDGE" :normal "sys" "dim") size-box)
+            (w/vbox 8 (w/tlabel "COLOUR SPACE" :normal "sys" "dim") space-box)
             (:node q-row)
             (w/vbox 4 (w/hbox 8 (w/tlabel "FOLDER" :normal "sys" "dim") (w/spacer) choose) dir-lbl)
             name-lbl
@@ -141,6 +146,18 @@
                                         (let [b (w/pill l (fn [] (swap! st/state assoc :size v)))]
                                           (w/set-base-a11y! b (if (zero? v) "Full resolution" (str "Long edge " v " pixels")))
                                           (w/set-on! b (= v (:size s)))
+                                          (.add (.getChildren fp) b)))
+                                      fp))))
+           (w/keep-focus! space-box
+                          (fn []
+                            (w/clear! space-box)
+                            (w/add! space-box
+                                    (let [fp (FlowPane. 8.0 8.0)]
+                                      (doseq [sp [:srgb :display-p3 :adobe-rgb]]
+                                        (let [label (:label (color/spaces sp))
+                                              b (w/pill (.toUpperCase ^String label) (fn [] (swap! st/state assoc :cspace sp)))]
+                                          (w/set-base-a11y! b (str "Colour space " label))
+                                          (w/set-on! b (= sp (:cspace s)))
                                           (.add (.getChildren fp) b)))
                                       fp))))
            (let [^Pane qn (:node q-row)]

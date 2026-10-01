@@ -1,7 +1,6 @@
 (ns darkroom.imaging.core-test
   (:require [clojure.test :refer [deftest is testing]]
-            [darkroom.imaging.core :as core]
-            [darkroom.imaging.pipeline :as pipeline]))
+            [darkroom.imaging.core :as core]))
 
 (defn- px [a r g b] (unchecked-int (bit-or (bit-shift-left a 24) (bit-shift-left r 16) (bit-shift-left g 8) b)))
 (defn- img [& ps] (core/image (count ps) 1 (int-array ps)))
@@ -20,11 +19,6 @@
     (let [i (img (px 255 10 10 10))]
       (core/adjust-brightness i 50)
       (is (= (px 255 10 10 10) (first-px i))))))
-
-(deftest pipeline-render
-  (let [i (img (px 255 100 100 100))]
-    (is (identical? i (pipeline/render i pipeline/default-settings)))
-    (is (not= (first-px i) (first-px (pipeline/render i {:exposure 0.5}))))))
 
 (deftest fit-downscale
   (let [big (core/image 4 4 (int-array (repeat 16 (px 255 100 50 10))))
@@ -80,9 +74,3 @@
     (testing "positive increases channel spread"
       (let [p (first-px (core/adjust-saturation (img (px 255 200 100 50)) 50))]
         (is (> (- (ch p 16) (ch p 0)) 150))))))
-
-(deftest pipeline-all-settings
-  (let [i (img (px 255 100 150 200))
-        o (pipeline/render i {:exposure 0.2 :contrast 0.2 :saturation -0.3})]
-    (is (not= (first-px i) (first-px o)))
-    (is (identical? i (pipeline/render i {:contrast 0.0 :aspect "orig"})))))

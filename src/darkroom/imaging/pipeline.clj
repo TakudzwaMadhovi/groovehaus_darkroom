@@ -1,5 +1,7 @@
 (ns darkroom.imaging.pipeline
-  "Maps a settings map (e.g. {:exposure 0.5 :denoise 40}) onto image stages:
+  "Maps a settings map (e.g. {:exposure 0.5 :denoise 40}) onto image stages.
+  Every stage takes and returns a float scene image (darkroom.imaging.scene);
+  convert the result with scene/->argb for display or export.
 
     1. denoise   (OpenCV non-local means; slow, so it runs first and is cached)
     2. geometry  (aspect crop, straighten, flip)

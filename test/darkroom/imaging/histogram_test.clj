@@ -2,7 +2,8 @@
   (:require [clojure.test :refer [deftest is testing]]
             [darkroom.imaging.core :as core]
             [darkroom.imaging.histogram :as h]
-            [darkroom.imaging.pipeline :as pipeline]))
+            [darkroom.imaging.pipeline :as pipeline]
+            [darkroom.imaging.scene :as scene]))
 
 (defn- px [r g b] (unchecked-int (bit-or 0xFF000000 (bit-shift-left r 16) (bit-shift-left g 8) b)))
 (defn- img [& ps] (core/image (count ps) 1 (int-array ps)))
@@ -22,7 +23,8 @@
 (deftest tracks-adjustments
   (let [i (img (px 100 100 100) (px 100 100 100))
         before (h/compute i)
-        after  (h/compute (pipeline/render i {:exposure 0.5}))]
+        after  (h/compute (scene/->argb (pipeline/render (scene/from-argb i) {:exposure 0.5})))]
     (is (= 2 (aget ^longs (:r before) 100)))
     (is (= 0 (aget ^longs (:r after) 100)))
-    (is (= 2 (aget ^longs (:r after) 141)))))
+    (testing "+0.5 stop = x1.41 in linear light: sRGB 100 -> 118"
+      (is (= 2 (reduce + (map #(aget ^longs (:r after) %) [117 118 119])))))))

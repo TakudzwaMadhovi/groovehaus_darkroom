@@ -4,10 +4,10 @@
   the views. Slider moves render at :draft quality; 300 ms after the last
   change a :preview pass refines it."
   (:require [darkroom.catalog :as cat]
-            [darkroom.imaging.core :as core]
             [darkroom.imaging.histogram :as histogram]
             [darkroom.imaging.loader :as loader]
             [darkroom.imaging.pipeline :as pipeline]
+            [darkroom.imaging.scene :as scene]
             [darkroom.ui.fx :as fx]
             [darkroom.ui.state :as st])
   (:import (java.util.concurrent ExecutorService)
@@ -27,7 +27,7 @@
   []
   (if (> (.getOutputScaleX (Screen/getPrimary)) 1.0) 2000 1400))
 
-;; Loaded frames: path -> {:preview image :renderer fn}. Small LRU by insertion order.
+;; Loaded frames: path -> {:preview scene image :renderer fn}. Small LRU by insertion order.
 (defonce ^:private loaded (atom {:order [] :frames {}}))
 (defonce ^:private loading (atom #{}))
 (def ^:private max-loaded 4)
@@ -61,7 +61,7 @@
                                   (fn []
                                     (when (current?)
                                       (try
-                                        (let [img  ((:renderer sess) settings {:quality quality})
+                                        (let [img  (scene/->argb ((:renderer sess) settings {:quality quality}))
                                               hist (histogram/compute img)
                                               fxi  (fx/->fx-image img)]
                                           (when (current?)
@@ -76,8 +76,8 @@
                     (.execute load-worker
                               (fn []
                                 (try
-                                  (let [source  (loader/load-image path)
-                                        preview (core/fit source (preview-side))]
+                                  (let [source  (loader/load-scene path)
+                                        preview (scene/fit source (preview-side))]
                                     (remember! path {:preview preview :renderer (pipeline/renderer preview)})
                                     (Platform/runLater
                                       (fn []

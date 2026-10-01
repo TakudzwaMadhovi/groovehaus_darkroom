@@ -3,6 +3,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [darkroom.dng :refer [write-dng!]]
+            [darkroom.imaging.color :as color]
             [darkroom.imaging.core :as core]
             [darkroom.imaging.export :as export]
             [darkroom.imaging.loader :as loader]
@@ -42,9 +43,46 @@
         ratio (/ (double (sample (:data hi) i)) (double (sample (:data lo) i)))]
     (is (< 1.9 ratio 2.1))))
 
+(defn- centre
+  "The middle pixel of a decoded linear image as [r g b] in 0-1."
+  [img]
+  (let [i (* 3 (+ (* (quot (:height img) 2) (:width img)) (quot (:width img) 2)))]
+    (mapv #(/ (sample (:data img) (+ i %)) 65535.0) [0 1 2])))
+
+(deftest working-space-matches-libraw-output-colour-4
+  ;; The editor decodes RAW with LibRaw output colour 4 and treats the result as
+  ;; the :working space defined in darkroom.imaging.color. Re-measure LibRaw with
+  ;; coloured patches (the synthetic DNG's camera space is linear sRGB) so a
+  ;; LibRaw change that moved its matrix cannot silently shift colours.
+  (let [m (color/convert-matrix :srgb :working)]
+    (doseq [rgb [[40000 10000 5000] [10000 40000 5000] [5000 10000 40000] [30000 30000 30000]]]
+      (let [expected (color/mat-vec m (map #(/ (double %) 65535.0) rgb))
+            actual   (centre (raw/decode-linear (write-dng! 64 48 rgb) {:output-color 4}))]
+        (is (every? true? (map #(< (Math/abs (- (double %1) (double %2))) 2e-3) expected actual))
+            (str rgb " expected " (mapv #(format "%.4f" %) expected) " got " (mapv #(format "%.4f" %) actual)))))))
+
+(deftest load-scene-is-linear-float-in-the-working-space
+  (let [sc (raw/load-scene (write-dng! 64 48 16384))
+        i  (* 3 (+ (* 24 64) 32))]
+    (is (= [64 48] [(:width sc) (:height sc)]))
+    (is (= (* 3 64 48) (alength ^floats (:data sc))))
+    (is (every? #(< (Math/abs (- 0.25 (double (aget ^floats (:data sc) (+ i %))))) 0.03) [0 1 2])
+        "25% scene light stays about 0.25: no gamma, no 8-bit quantisation"))
+  (testing "a saturated colour keeps precision below an 8-bit step"
+    (let [a (raw/load-scene (write-dng! 32 32 [20000 12000 3000]))
+          b (raw/load-scene (write-dng! 32 32 [20040 12000 3000]))
+          i (* 3 (+ (* 16 32) 16))]
+      (is (not= (aget ^floats (:data a) i) (aget ^floats (:data b) i))))))
+
 (deftest loader-dispatches-and-errors-cleanly
   (let [d (loader/load-image (write-dng! 32 32 20000))]
     (is (= [32 32] [(:width d) (:height d)])))
+  (let [d (loader/load-scene (write-dng! 32 32 20000))]
+    (is (= [32 32] [(:width d) (:height d)]))
+    (is (= (* 3 32 32) (alength ^floats (:data d)))))
+  (let [d (loader/load-scene "resources/sample.png")]
+    (is (= [800 600] [(:width d) (:height d)]))
+    (is (= (* 3 800 600) (alength ^floats (:data d)))))
   (is (= [800 600] (let [i (loader/load-image "resources/sample.png")] [(:width i) (:height i)])))
   (let [bad (File/createTempFile "darkroom-bad" ".arw")]
     (.deleteOnExit bad)

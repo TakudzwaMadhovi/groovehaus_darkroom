@@ -4,6 +4,12 @@ Photo editor in Clojure + JavaFX. The UI follows the Groovehaus design handoff
 (black canvas, bone type, one sun-yellow accent, Bebas Neue / Cormorant Garamond /
 Rajdhani); the engine is pure Clojure plus OpenCV (denoise) and LibRaw (RAW).
 
+Editing is done on **float, scene-linear pixels in a wide-gamut working space**, not
+on 8-bit sRGB: RAW files keep their 16-bit precision, exposure and white balance act
+on linear light, over-range highlights survive until the final clamp, and export
+converts to sRGB, Display P3 or Adobe RGB with the ICC profile and camera EXIF
+embedded.
+
 ## Run
 
 Requires JDK 17+ and [Leiningen](https://leiningen.org).
@@ -24,11 +30,13 @@ is stored as EDN in the per-user data folder
   Click selects, double-click or `↵` opens Develop. Drag files/folders onto the grid
   or use `IMPORT +` to add frames to the open shoot.
 - **Develop**: canvas with AFTER/BEFORE, luma histogram, tabs
-  BASIC (exposure, contrast, highlights, shadows, temperature, saturation, denoise),
+  BASIC (exposure, contrast, highlights, shadows, temperature, tint, saturation, denoise),
   CURVE, LOOK (B&W, fade, grain, vignette), CROP (straighten, aspect, flip),
   PRESETS, HISTORY; filmstrip "THE ROLL".
-- **Export** (`⌘E`): JPEG/PNG, long edge 1080 / 2048 / full, JPEG quality, destination
-  folder. Renders the full-resolution original; never overwrites (adds `-2`, `-3`).
+- **Export** (`⌘E`): JPEG/PNG, long edge 1080 / 2048 / full, colour space (sRGB,
+  Display P3, Adobe RGB), JPEG quality, destination folder. Renders the full-resolution
+  original; never overwrites (adds `-2`, `-3`). The output carries its ICC profile; JPEGs
+  also carry the camera's EXIF (make, model, lens, exposure, ISO, dates, copyright).
 
 Shortcuts: `⌘I` import · `⌘E`/`E` export · `Esc` close · `\` hold = before ·
 `← →` frames (wraps) · `0–5` rating (same key clears) · `G` Library · `D` Develop ·
@@ -38,12 +46,14 @@ Shortcuts: `⌘I` import · `⌘E`/`E` export · `Esc` close · `\` hold = befor
 
 | Namespace | Role |
 |---|---|
-| `darkroom.imaging.core` | Pixel helpers: load, `fit`, `orient`, legacy brightness/contrast/gamma ops |
-| `darkroom.imaging.develop` | Develop engine: geometry (crop/straighten/flip), tone pipeline, curve LUT, resize. Port of the handoff's reference engine (parity-tested) |
-| `darkroom.imaging.denoise` | OpenCV non-local-means denoise (offline, CPU) |
+| `darkroom.imaging.color` | Colour science: RGB spaces, 3x3 matrices, transfer curves, Bradford adaptation, white-balance (temperature/tint) matrix, ICC profile generation |
+| `darkroom.imaging.scene` | Float scene-linear images in the working space; conversion from 8-bit sRGB / LibRaw 16-bit and to 8/16-bit output spaces; LUT helpers; linear-light box downscale |
+| `darkroom.imaging.core` | 8-bit ARGB pixel helpers: load, `fit`, `orient`, legacy brightness/contrast/gamma ops |
+| `darkroom.imaging.develop` | Develop engine on scene images: tone pipeline (linear exposure + white balance, then perceptual-domain edits), curve LUT, geometry (crop/straighten/flip), resize |
+| `darkroom.imaging.denoise` | OpenCV non-local-means denoise on 16-bit data (offline, CPU) |
 | `darkroom.imaging.pipeline` | Stages denoise → geometry → tone, with a per-stage cache for interactive use |
-| `darkroom.imaging.raw` / `loader` / `exif` | LibRaw decode to linear RGB, single image loader, EXIF orientation |
-| `darkroom.imaging.histogram` / `export` / `browser` | Histogram, JPEG/PNG writer, folder scan + thumbnails |
+| `darkroom.imaging.raw` / `loader` / `exif` | LibRaw decode (16-bit linear, working space), single image loader, EXIF orientation/read/write |
+| `darkroom.imaging.histogram` / `export` / `browser` | Histogram, JPEG/PNG writer with ICC + EXIF, folder scan + thumbnails |
 | `darkroom.catalog` | Pure library model: shoots, frames, ratings, adjustments, history, presets; EDN persistence |
 | `darkroom.ui.state` | App state atom and actions |
 | `darkroom.ui.theme` / `widgets` / `darkroom.css` | Fonts, stylesheet, tracked text, buttons, slider |
@@ -77,14 +87,37 @@ Shortcuts: `⌘I` import · `⌘E`/`E` export · `Esc` close · `\` hold = befor
 
 - Sliders re-render a downscaled working copy (1400 px, 2000 px on Retina) off the UI
   thread; stale requests are dropped. Tone and geometry are fused per-pixel loops
-  split across cores (about 50 ms for a 1.7 MP working copy, 0.9 s for 24 MP in tests).
+  split across cores (about 0.1 us per pixel per stage on 4 cores: 6 MP in 0.6 s).
 - Denoise runs at :draft quality while a slider moves and refines 300 ms later;
   `pipeline/renderer` caches each stage so tone changes never re-run denoise.
-- JVM: `-Djava.awt.headless=true -Xmx2g` (see `project.clj`; pass them yourself for a jar).
+- Memory: a float image is 12 bytes per pixel. The JVM heap is `-XX:MaxRAMPercentage=60`
+  (see `project.clj`; pass `-Djava.awt.headless=true -XX:MaxRAMPercentage=60` yourself for a jar).
+- Rendering is CPU-only; there is no GPU path.
+
+## Colour pipeline
+
+1. **Decode.** RAW: LibRaw, 16-bit linear, camera white balance, output colour 4
+   (a wide-gamut space defined in `color/spaces :working`; `raw-test` re-measures it
+   against a synthetic DNG). Other formats: 8-bit sRGB, linearised exactly (round trip is
+   bit-exact).
+2. **Linear light.** White balance (temperature/tint as a Bradford adaptation
+   between source and D65 whites) and exposure (a true `2^EV` gain).
+3. **Perceptual domain.** Shadows/highlights, contrast, fade, tone curve, saturation,
+   black & white, vignette and grain run on sRGB-encoded values of the same pixels (as
+   the design reference did). Values are not clamped here, only at the end.
+4. **Output.** Matrix to the chosen space, clamp (gamut clip), that space's curve,
+   quantise. The preview is always sRGB; there is no display-profile management, so on a
+   wide-gamut monitor the preview is shown as sRGB.
+
+Alpha is not carried: images are treated as opaque photographs.
 
 ## Notes on the design port
 
 JavaFX has no CSS letter-spacing, so tracked labels insert thin/hair spaces.
 Sliders are native `Slider`s styled in CSS with a gradient fill. The design's
-BASIC tab has no denoise or brightness/gamma controls: DENOISE was added as a 7th
-BASIC slider; the earlier brightness/gamma ops remain in `core` but are not in the UI.
+BASIC tab has no denoise, tint or brightness/gamma controls: DENOISE and TINT were added as
+BASIC sliders; the earlier brightness/gamma ops remain in `core` but are not in the UI.
+The tone maths was moved from the design reference's 8-bit gamma-space engine to the float
+pipeline above, so exposure and temperature no longer match the reference pixel for pixel
+(the reference multiplied encoded values; exposure is now real light) and the presets look
+slightly different from the prototype.

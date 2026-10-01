@@ -1,9 +1,16 @@
 (ns darkroom.imaging.export
-  "Writes an image map to disk as JPEG or PNG. Pure logic, no UI dependency."
+  "Writes images to disk as JPEG or PNG, optionally embedding an ICC profile
+  (and, for JPEG, EXIF). Pure logic, no UI dependency."
+  (:require [darkroom.imaging.color :as color]
+            [darkroom.imaging.exif :as exif]
+            [darkroom.imaging.scene :as scene])
   (:import (java.awt.image BufferedImage)
            (java.io File)
            (java.nio.file Files StandardCopyOption)
-           (javax.imageio IIOImage ImageIO ImageWriteParam ImageWriter)))
+           (java.util.zip Deflater)
+           (javax.imageio IIOImage ImageIO ImageTypeSpecifier ImageWriteParam ImageWriter)
+           (javax.imageio.metadata IIOMetadata IIOMetadataNode)
+           (org.w3c.dom Node)))
 
 (def formats
   "Supported formats. :lossy? formats take a :quality in (0, 1]."
@@ -43,12 +50,73 @@
       (.setRGB out 0 0 w h src 0 w))
     out))
 
+(def ^:private jpeg-tree "javax_imageio_jpeg_image_1.0")
+(def ^:private png-tree "javax_imageio_png_1.0")
+
+(defn icc-app2-segments
+  "JPEG APP2 payloads carrying `icc` (ICC_PROFILE chunks of at most 65519 bytes)."
+  [^bytes icc]
+  (let [max-chunk 65519
+        n (max 1 (long (Math/ceil (/ (alength icc) (double max-chunk)))))]
+    (vec (for [i (range n)]
+           (let [from (* i max-chunk) to (min (alength icc) (+ from max-chunk))
+                 out (java.io.ByteArrayOutputStream.)]
+             (.write out (.getBytes "ICC_PROFILE" "US-ASCII")) (.write out 0)
+             (.write out (int (inc i))) (.write out (int n))
+             (.write out icc (int from) (int (- to from)))
+             (.toByteArray out))))))
+
+(defn- deflate ^bytes [^bytes bs]
+  (let [d (Deflater.) out (java.io.ByteArrayOutputStream.) buf (byte-array 4096)]
+    (.setInput d bs) (.finish d)
+    (while (not (.finished d))
+      (let [n (.deflate d buf)] (.write out buf 0 n)))
+    (.end d)
+    (.toByteArray out)))
+
+(defn- first-element ^Node [^Node root ^String tag]
+  (.item (.getElementsByTagName ^org.w3c.dom.Element root tag) 0))
+
+(defn- marker-node ^IIOMetadataNode [tag ^bytes data]
+  (doto (IIOMetadataNode. "unknown")
+    (.setAttribute "MarkerTag" (str tag))
+    (.setUserObject data)))
+
+(defn- jpeg-metadata
+  "Default JPEG metadata plus an EXIF APP1 and ICC APP2 segments (inserted
+  ahead of the table/frame markers, after JFIF)."
+  ^IIOMetadata [^ImageWriter w ^BufferedImage img param icc exif-block]
+  (let [md   (.getDefaultImageMetadata w (ImageTypeSpecifier. img) param)
+        root (.getAsTree md jpeg-tree)
+        seq-node (first-element root "markerSequence")
+        segments (concat (when exif-block [[225 exif-block]])
+                         (when icc (map (fn [b] [226 b]) (icc-app2-segments icc))))]
+    (doseq [[tag bs] (reverse segments)]
+      (.insertBefore seq-node (marker-node tag bs) (.getFirstChild seq-node)))
+    (.setFromTree md jpeg-tree root)
+    md))
+
+(defn- png-metadata
+  "Default PNG metadata plus an iCCP chunk."
+  ^IIOMetadata [^ImageWriter w ^BufferedImage img param ^bytes icc]
+  (let [md   (.getDefaultImageMetadata w (ImageTypeSpecifier. img) param)
+        root (.getAsTree md png-tree)
+        node (doto (IIOMetadataNode. "iCCP")
+               (.setAttribute "profileName" "ICC profile")
+               (.setAttribute "compressionMethod" "deflate")
+               (.setUserObject (deflate icc)))]
+    (.appendChild root node)
+    (.setFromTree md png-tree root)
+    md))
+
 (defn save!
-  "Writes `img` to `dir`/`name` in `fmt` (:jpeg or :png). `quality` (0-1] only
-  applies to JPEG; PNG is always lossless. The file is written to a temp file
-  beside the target and moved into place, so a failure never leaves a
+  "Writes `img` (packed-ARGB image map) to `dir`/`name` in `fmt` (:jpeg or
+  :png). `quality` (0-1] only applies to JPEG; PNG is always lossless.
+  :icc (profile bytes) is embedded in both; :exif (an APP1 payload from
+  darkroom.imaging.exif/exif-block) in JPEG only. The file is written to a temp
+  file beside the target and moved into place, so a failure never leaves a
   half-written or clobbered file. Returns the File written."
-  [img {:keys [dir name format quality] :or {quality default-quality}}]
+  [img {:keys [dir name format quality icc exif] :or {quality default-quality}}]
   (let [{:keys [writer lossy?]} (or (formats format)
                                     (throw (ex-info "Unsupported format" {:format format})))
         _      (when (and lossy? (not (< 0.0 (double quality) 1.0000001)))
@@ -68,10 +136,24 @@
             (.setCompressionMode param ImageWriteParam/MODE_EXPLICIT)
             (.setCompressionType param (first (.getCompressionTypes param)))
             (.setCompressionQuality param (float quality)))
-          (.write w nil (IIOImage. (->buffered img lossy?) nil nil) param)))
+          (let [buf (->buffered img lossy?)
+                md  (cond (and lossy? (or icc exif)) (jpeg-metadata w buf param icc exif)
+                          (and (not lossy?) icc)     (png-metadata w buf param icc))]
+            (.write w nil (IIOImage. buf nil md) param))))
       (Files/move (.toPath tmp) (.toPath target)
                   (into-array java.nio.file.CopyOption [StandardCopyOption/REPLACE_EXISTING]))
       target
       (finally
         (.dispose w)
         (Files/deleteIfExists (.toPath tmp))))))
+
+(defn save-scene!
+  "Renders the float scene image `sc` into the output colour `space` (:srgb,
+  :display-p3 or :adobe-rgb, default :srgb), embeds its ICC profile, and saves
+  it like `save!`. For JPEG, `:tags` (darkroom.imaging.exif/read-tags of the
+  source) become EXIF. Returns the File written."
+  [sc {:keys [space tags] :or {space :srgb} :as opts}]
+  (save! (scene/->argb sc space)
+         (assoc (dissoc opts :space :tags)
+                :icc (color/icc-bytes space)
+                :exif (exif/exif-block (or tags {}) {:srgb? (= space :srgb)}))))
