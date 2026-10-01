@@ -122,8 +122,18 @@ The choice is a per-frame setting (one history step); presets leave it alone; ch
 reloads the frame. Verified against real profiles (table order checked by smoothness) and a
 synthetic DNG whose matrix-only profile reproduces LibRaw's own conversion.
 
-Not implemented: DefaultBlackRender, ICC input profiles, the profile policy flags, and
-profiles for non-RAW files; four-colour sensors fall back to the default decode path.
+`ADD PROFILE…` also takes **ICC input profiles** (`.icc` / `.icm`, matrix or LUT based, as
+made by profiling software from a photographed chart): the white-balanced camera RGB goes
+through the profile's conversion to the connection space (a 33³ table sampled from the JDK's
+colour engine, spaced for fine shadows) and on to the working space; values above 1.0 keep
+their colour. Checked with real profiles (sRGB v4, a LUT-based display profile): white stays
+white and greys stay neutral. A profile is applied to the camera's own values as they come
+from the demosaic, so use profiles made for linear raw data with the camera's white balance.
+
+Not implemented: the DCP's DefaultBlackRender (Adobe's behaviour for it is not specified
+precisely enough to reproduce), the profile policy flags, profiles for non-RAW files, and
+four-colour sensors (CMYG / RGBE: their matrices are 4×3 and there is no sample file to
+verify against), which fall back to the default decode path.
 
 ### Hot folder and sharing a catalog
 

@@ -608,7 +608,7 @@
         add-btn (doto (w/pill "ADD PROFILE…"
                               (fn []
                                 (let [ch (doto (javafx.stage.FileChooser.) (.setTitle "Camera profiles (.dcp)"))]
-                                  (.add (.getExtensionFilters ch) (javafx.stage.FileChooser$ExtensionFilter. "DNG camera profile" ["*.dcp" "*.DCP"]))
+                                  (.add (.getExtensionFilters ch) (javafx.stage.FileChooser$ExtensionFilter. "Camera profile (DNG .dcp or ICC input profile)" ["*.dcp" "*.DCP" "*.icc" "*.ICC" "*.icm" "*.ICM"]))
                                   (when-let [fs (.showOpenMultipleDialog ch (first (javafx.stage.Window/getWindows)))]
                                     (let [{:keys [added failed]} (st/add-camera-profiles! fs)]
                                       (st/toast! (cond (and (pos? added) (empty? failed)) (str added " PROFILE" (when (not= added 1) "S") " ADDED")
@@ -646,7 +646,7 @@
                           (w/set-on! b (= path cur)) (.setDisable b (not raw?))
                           (w/add! pills b x)))))
                   (.setText note (theme/tracked (cond (not raw?) "CAMERA PROFILES APPLY TO RAW FILES ONLY"
-                                                      (empty? profiles) "ADD A .DCP FILE (FROM LIGHTROOM / CAMERA RAW / DNG PROFILE EDITOR)"
+                                                      (empty? profiles) "ADD A .DCP (LIGHTROOM / CAMERA RAW / DNG PROFILE EDITOR) OR AN ICC INPUT PROFILE"
                                                       :else "") :normal)))
                 (w/set-on! curve-btn (boolean (:camera-profile-curve adj)))
                 (.setDisable curve-btn (or (not raw?) (nil? cur)))

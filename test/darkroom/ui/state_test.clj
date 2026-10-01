@@ -440,3 +440,13 @@
         (is (= 4 (count crop)))
         (is (every? #(<= 0.0 % 1.0) crop))
         (is (> (nth crop 2) 0.9) "the crop keeps nearly the whole canvas")))))
+
+(deftest icc-input-profiles-are-listed-like-dcp-ones
+  (let [d (tmp-dir) f (java.io.File. d "mycam.icc")]
+    (java.nio.file.Files/write (.toPath f) ^bytes (darkroom.imaging.color/icc-bytes :adobe-rgb) (into-array java.nio.file.OpenOption []))
+    (shoot-with "a.png")
+    (is (= {:added 1 :failed []} (st/add-camera-profiles! [f])))
+    (is (= ["Adobe RGB (1998)"] (mapv :name (st/camera-profiles))))
+    (st/set-camera-profile! (.getPath f))
+    (is (= (.getPath f) (:camera-profile (st/cur-adj @st/state))))
+    (st/remove-camera-profile! (.getPath f))))

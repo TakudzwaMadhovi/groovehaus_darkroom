@@ -16,13 +16,19 @@
        style); optionally its tone curve;
     4. XYZ (D50) -> the working space.
 
-  Not implemented: the profile's DefaultBlackRender and the embedded-profile
-  policy flags (which only matter to software that writes profiles). Pure logic,
-  no UI dependency."
+  An ICC input profile (.icc / .icm, matrix or LUT based, as made by profiling
+  software from a photographed colour chart) works too: the white-balanced camera
+  RGB goes through the profile to the connection space (via a sampled 3D table
+  of the Java colour engine's conversion) and on to the working space.
+
+  Not implemented: the DCP's DefaultBlackRender and the embedded-profile policy
+  flags (which only matter to software that writes profiles). Pure logic, no UI
+  dependency."
   (:require [darkroom.imaging.color :as color]
             [darkroom.imaging.core :as core]
             [darkroom.imaging.dcp :as dcp]
-            [darkroom.imaging.scene :as scene]))
+            [darkroom.imaging.scene :as scene]
+            [clojure.string :as str]))
 
 (set! *unchecked-math* :warn-on-boxed)
 
@@ -216,12 +222,20 @@
 
 ;; ------------------------------------------------------------ rendering
 
+(declare render-dcp render-icc)
+
 (defn render
   "The working-space scene image for `cam`, a float image {:width :height :data}
   of white-balanced linear camera RGB (65535 -> 1.0), through `profile` (parsed
   .dcp) for a camera whose recorded white is `neutral` ([r g b]).
   opts :tone-curve? applies the profile's own tone curve."
   [{:keys [^long width ^long height data] :as cam} profile neutral & [{:keys [tone-curve?]}]]
+  (if (:icc profile)
+    (render-icc cam profile)
+    (render-dcp cam profile neutral tone-curve?)))
+
+(defn- render-dcp
+  [{:keys [^long width ^long height data] :as cam} profile neutral tone-curve?]
   (let [p (ordered profile)
         w (interpolation-weight p neutral)
         m (camera->xyz p neutral)
@@ -274,13 +288,99 @@
               (recur (inc i)))))))
     (scene/image width height out)))
 
+;; ------------------------------------------------------------ ICC input profiles
+
+(def ^:private ^:const lut-n 33)
+(def ^:private ^:const lut-gamma 2.4)
+
+(defn icc-profile
+  "{:icc bytes :name description} for the bytes of an RGB ICC profile; throws
+  ex-info when it is not a usable three-channel RGB profile."
+  [^bytes bs]
+  (let [^java.awt.color.ICC_Profile p (try (java.awt.color.ICC_Profile/getInstance bs)
+                                           (catch Throwable t (throw (ex-info "Not an ICC profile" {} t))))]
+    (when-not (and (== 3 (.getNumComponents p)) (== java.awt.color.ColorSpace/TYPE_RGB (.getColorSpaceType p)))
+      (throw (ex-info "The ICC profile is not an RGB profile" {})))
+    (let [^bytes d (.getData p java.awt.color.ICC_Profile/icSigProfileDescriptionTag)
+          ;; 'desc' (v2): type, reserved, count, ASCII; 'mluc' (v4): UTF-16BE record
+          desc (try (cond (nil? d) nil
+                          (= "desc" (String. d 0 4 "US-ASCII"))
+                          (let [n (.getInt (java.nio.ByteBuffer/wrap d) 8)] (String. d 12 (Math/max 0 (dec n)) "US-ASCII"))
+                          (= "mluc" (String. d 0 4 "US-ASCII"))
+                          (let [bb (java.nio.ByteBuffer/wrap d) len (.getInt bb 20) off (.getInt bb 24)] (String. d off len "UTF-16BE"))
+                          :else nil)
+                    (catch Throwable _ nil))]
+      {:icc bs :name (or (not-empty (str/trim (str desc))) "ICC profile")})))
+
+(defn- icc-lut
+  "Float array [n n n 3] of XYZ (D50) for camera RGB at nodes spaced in x^(1/2.4)
+  (dense near black), computed by the JDK's colour engine from the profile."
+  ^floats [{:keys [^bytes icc]}]
+  (let [cs (java.awt.color.ICC_ColorSpace. (java.awt.color.ICC_Profile/getInstance icc))
+        n lut-n ^floats lut (float-array (* n n n 3))
+        node (fn ^double [^long i] (Math/pow (/ (double i) (double (dec n))) lut-gamma))]
+    (dotimes [ri n]
+      (dotimes [gi n]
+        (dotimes [bi n]
+          (let [xyz (.toCIEXYZ cs (float-array [(node ri) (node gi) (node bi)]))
+                o (* 3 (+ (* (+ (* ri n) gi) n) bi))]
+            (aset lut o (aget xyz 0)) (aset lut (+ o 1) (aget xyz 1)) (aset lut (+ o 2) (aget xyz 2))))))
+    lut))
+
+(defonce ^:private icc-luts (atom {}))
+
+(defn- lut-for ^floats [{:keys [^bytes icc] :as profile}]
+  (let [k (java.util.Arrays/hashCode icc)]
+    (or (@icc-luts k) (let [l (icc-lut profile)] (reset! icc-luts {k l}) l))))
+
+(defn render-icc
+  "Working-space scene image for `cam` (white-balanced linear camera RGB, 65535
+  -> 1.0) through the ICC input profile `profile` (see icc-profile). Values above
+  1.0 keep their colour and scale: the colour of the clipped value is looked up
+  and multiplied back."
+  [{:keys [^long width ^long height data]} profile]
+  (let [^floats lut (lut-for profile)
+        to-working (color/mat* (color/xyz->rgb-matrix :working) (color/adaptation-matrix color/d50-xy color/d65-xy))
+        ^doubles tw (double-array to-working)
+        ^floats src data
+        n (* width height) ^floats out (float-array (* 3 n))
+        inv-g (/ 1.0 lut-gamma) top (double (dec lut-n))]
+    (core/parallel-ranges!
+      n
+      (fn [^long start ^long end]
+        (let [xyz (double-array 3)]
+          (loop [i start]
+            (when (< i end)
+              (let [j (* 3 i)
+                    r (Math/max 0.0 (double (aget src j))) g (Math/max 0.0 (double (aget src (+ j 1)))) b (Math/max 0.0 (double (aget src (+ j 2))))
+                    m (Math/max 1.0 (Math/max r (Math/max g b)))
+                    ;; position in node units
+                    fr (* top (Math/pow (/ r m) inv-g)) fg (* top (Math/pow (/ g m) inv-g)) fb (* top (Math/pow (/ b m) inv-g))
+                    r0 (Math/min (- lut-n 2) (long fr)) g0 (Math/min (- lut-n 2) (long fg)) b0 (Math/min (- lut-n 2) (long fb))
+                    tr (- fr r0) tg (- fg g0) tb (- fb b0)]
+                (dotimes [c 3]
+                  (let [at (fn ^double [^long ri ^long gi ^long bi] (double (aget lut (+ (* 3 (+ (* (+ (* ri lut-n) gi) lut-n) bi)) c))))
+                        l (fn ^double [^double a ^double bb ^double t] (+ (* (- 1.0 t) a) (* t bb)))
+                        c00 (l (at r0 g0 b0) (at (inc r0) g0 b0) tr) c10 (l (at r0 (inc g0) b0) (at (inc r0) (inc g0) b0) tr)
+                        c01 (l (at r0 g0 (inc b0)) (at (inc r0) g0 (inc b0)) tr) c11 (l (at r0 (inc g0) (inc b0)) (at (inc r0) (inc g0) (inc b0)) tr)]
+                    (aset xyz c (* m (double (l (l c00 c10 tg) (l c01 c11 tg) tb))))))
+                (let [x (aget xyz 0) y (aget xyz 1) z (aget xyz 2)]
+                  (aset out j (float (+ (* (aget tw 0) x) (* (aget tw 1) y) (* (aget tw 2) z))))
+                  (aset out (+ j 1) (float (+ (* (aget tw 3) x) (* (aget tw 4) y) (* (aget tw 5) z))))
+                  (aset out (+ j 2) (float (+ (* (aget tw 6) x) (* (aget tw 7) y) (* (aget tw 8) z))))))
+              (recur (inc i)))))))
+    (scene/image width height out)))
+
 (defonce ^:private profile-cache (atom {}))
 
 (defn load-profile
-  "Parsed .dcp for `path`, remembered until the file changes."
+  "Parsed camera profile for `path` (a .dcp, or an .icc / .icm input profile),
+  remembered until the file changes."
   [path]
   (let [f (java.io.File. (str path)) k [(.getPath f) (.lastModified f)]]
     (or (get @profile-cache k)
-        (let [p (dcp/read-file f)]
+        (let [p (if (re-find #"(?i)\.ic[cm]$" (.getName f))
+                  (icc-profile (java.nio.file.Files/readAllBytes (.toPath f)))
+                  (dcp/read-file f))]
           (swap! profile-cache (fn [m] (assoc (into {} (remove (fn [[[pp _] _]] (= pp (.getPath f))) m)) k p)))
           p))))

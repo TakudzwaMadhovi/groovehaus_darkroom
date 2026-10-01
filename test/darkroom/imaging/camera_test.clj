@@ -146,3 +146,55 @@
       (let [png (java.io.File/createTempFile "xyz" ".png")]
         (javax.imageio.ImageIO/write (java.awt.image.BufferedImage. 4 4 java.awt.image.BufferedImage/TYPE_INT_RGB) "png" png)
         (is (= 4 (:width (loader/load-scene (.getPath png) {:camera-profile (.getPath grey-it)}))))))))
+
+(deftest icc-input-profile-matches-the-colour-maths
+  ;; a camera that "sees" Display P3 with the sRGB curve: the ICC profile is our own generated Display P3 one
+  (let [prof (camera/icc-profile (color/icc-bytes :display-p3))
+        src (image 4 1 (fn [i] (case (int i) 0 [0.5 0.5 0.5] 1 [1.0 0.0 0.0] 2 [0.3 0.6 0.2] 3 [2.0 1.0 0.5])))
+        out (camera/render-icc src prof)
+        linear (fn [v] (color/srgb-decode v))
+        to-working (color/convert-matrix :display-p3 :working)]
+    (is (string? (:name prof)))
+    (testing "a grey device value gives the grey of its decoded brightness, in all three channels"
+      (is (every? #(near? % (linear 0.5) 2e-3) (px out 0))))
+    (testing "colours land where the colour maths puts them (the table's interpolation error is small)"
+      (doseq [i [1 2]]
+        (let [want (color/mat-vec to-working (mapv linear (px src i)))]
+          (is (every? true? (map #(near? %1 %2 6e-3) want (px out i))) (str "pixel " i ": " want " vs " (px out i))))))
+    (testing "an over-range value keeps its colour (its clipped colour, scaled)"
+      (let [clipped (px out 3)
+            base (color/mat-vec to-working (mapv linear [1.0 0.5 0.25]))]
+        (is (every? true? (map #(near? (* 2.0 %1) %2 2e-2) base clipped))))))
+  (testing "files that are not usable RGB profiles are refused"
+    (is (thrown? clojure.lang.ExceptionInfo (camera/icc-profile (byte-array 64))))
+    (is (thrown? clojure.lang.ExceptionInfo (camera/icc-profile (java.nio.file.Files/readAllBytes
+                                                                   (.toPath (java.io.File. "/dev/null")))))))
+  (testing "load-profile reads .icc files and names them"
+    (let [f (java.io.File/createTempFile "myprofile" ".icc")]
+      (.deleteOnExit f)
+      (java.nio.file.Files/write (.toPath f) ^bytes (color/icc-bytes :adobe-rgb) (into-array java.nio.file.OpenOption []))
+      (is (= "Adobe RGB (1998)" (:name (camera/load-profile (.getPath f))))))))
+
+(deftest real-icc-files
+  (let [dir (System/getenv "GROOVEHAUS_TEST_ICC_DIR")]
+    (if-not (and dir (.isDirectory (java.io.File. ^String dir)))
+      (println "  (skipped: set GROOVEHAUS_TEST_ICC_DIR to a folder with sRGB-v4.icc and ibm-t61.icc)")
+      (doseq [n ["sRGB-v4.icc" "ibm-t61.icc"]]
+        (let [f (java.io.File. ^String dir ^String n)]
+          (when (.isFile f)
+            (let [prof (camera/load-profile (.getPath f))
+                  white (camera/render-icc (image 1 1 (fn [_] [1.0 1.0 1.0])) prof)
+                  mid (camera/render-icc (image 1 1 (fn [_] [0.4 0.4 0.4])) prof)]
+              (is (every? #(near? % 1.0 5e-3) (px white 0)) (str n ": white stays white"))
+              (is (< (- (apply max (px mid 0)) (apply min (px mid 0))) 0.01) (str n ": grey stays neutral")))))))))
+
+(deftest raw-through-an-icc-profile
+  ;; an ICC profile whose device space IS the linear working space: the camera values come out unchanged
+  (let [f (java.io.File/createTempFile "ident" ".icc")]
+    (.deleteOnExit f)
+    (java.nio.file.Files/write (.toPath f) ^bytes (color/icc-bytes :working-linear) (into-array java.nio.file.OpenOption []))
+    (doseq [rgb [[40000 10000 5000] [10000 40000 5000] [30000 30000 30000]]]
+      (let [dng (write-dng! 64 48 rgb)
+            got (centre (loader/load-scene (.getPath dng) {:camera-profile (.getPath f)}))
+            want (mapv #(/ (double %) 65535.0) rgb)]
+        (is (every? true? (map #(near? %1 %2 4e-3) want got)) (str rgb " -> " got))))))
