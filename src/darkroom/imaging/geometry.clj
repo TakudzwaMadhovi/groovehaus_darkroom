@@ -1,6 +1,7 @@
 (ns darkroom.imaging.geometry
   "Geometry on float scene images: crop, straighten, 90-degree turns, flips,
-  perspective (keystone), lens distortion and chromatic-aberration correction,
+  perspective (keystone), lens distortion and chromatic-aberration correction
+  (by slider or from a lens profile, see darkroom.imaging.lens),
   and resizing. Everything is a single bilinear resampling pass in linear light
   (`geometry`), with the zoom that keeps the frame filled worked out
   numerically. Pure logic, no UI dependency.
@@ -18,7 +19,8 @@
 (def defaults
   "Neutral values for every geometry setting."
   {:angle 0.0 :aspect "orig" :flip false :flip-v false :rotate 0 :crop nil
-   :persp-v 0.0 :persp-h 0.0 :distortion 0.0 :ca-red 0.0 :ca-blue 0.0})
+   :persp-v 0.0 :persp-h 0.0 :distortion 0.0 :ca-red 0.0 :ca-blue 0.0
+   :lens-profile nil})
 
 (def geometry-keys (vec (keys defaults)))
 
@@ -73,6 +75,33 @@
         [_ _ w h] (crop-rect settings fw fh)]
     [(max 1 (Math/round (double w))) (max 1 (Math/round (double h)))]))
 
+;; ------------------------------------------------------------- lens profile
+
+(defn- profile-coefficients
+  "Radial polynomial k(rho) = 1 + c1 rho + c2 rho^2 + c3 rho^3 + c4 rho^4 as a
+  double array [c1 c2 c3 c4] for a profile {:model :poly3 / :poly5 / :ptlens :terms [..]}."
+  ^doubles [{:keys [model terms]}]
+  (let [t (vec terms) at (fn [i] (double (get t i 0.0)))]
+    (case model
+      :poly3  (double-array [0.0 (at 0) 0.0 0.0])
+      :poly5  (double-array [0.0 (at 0) 0.0 (at 1)])
+      :ptlens (double-array [(at 2) (at 1) (at 0) 0.0])
+      (throw (ex-info "Unknown lens distortion model" {:model model})))))
+
+(defn- profile-rho-scale
+  "Factor turning a source-pixel radius into the profile's radius unit (focal
+  lengths on the sensor, as lensfun's NormScale defines it): sensor diagonal /
+  crop factor / real focal length / pixel diagonal. `:unit` of the profile holds
+  the first three; the pixel diagonal is that of this (possibly preview-sized) image."
+  ^double [{:keys [unit]} ^double iw ^double ih]
+  (/ (double unit) (Math/hypot iw ih)))
+
+(defn lens-profile-k
+  "Radius scale of the profile at profile radius `rho` (output coordinates to
+  source coordinates, as in lensfun's distortion modifiers)."
+  ^double [^doubles c ^double rho]
+  (+ 1.0 (* rho (+ (aget c 0) (* rho (+ (aget c 1) (* rho (+ (aget c 2) (* rho (aget c 3))))))))))
+
 ;; ------------------------------------------------------------- the mapping
 
 (def ^:private ^:const persp-strength 0.35)
@@ -87,7 +116,7 @@
   "Where output frame point (x, y) (pixels from the frame centre) comes from in
   the source (pixels from the source centre), for zoom `z`; `ca` scales the
   radius (chromatic aberration). Mirrors the per-pixel code in `geometry`."
-  [{:keys [iw ih fw fh rot cos-t sin-t flip-h? flip-v? pv ph dist]} z ca x y]
+  [{:keys [iw ih fw fh rot cos-t sin-t flip-h? flip-v? pv ph dist lp-coef lp-scale]} z ca x y]
   (let [iw (double iw) ih (double ih) fw (double fw) fh (double fh) rot (long rot)
         cos-t (double cos-t) sin-t (double sin-t) pv (double pv) ph (double ph) dist (double dist)
         z (double z) ca (double ca) x (double x) y (double y)
@@ -101,7 +130,8 @@
         ry (if flip-v? (- ry) ry)
         [sx0 sy0] (case rot 0 [rx ry] 1 [ry (- rx)] 2 [(- rx) (- ry)] [(- ry) rx])
         r2 (/ (+ (* sx0 sx0) (* sy0 sy0)) (* 0.25 (+ (* iw iw) (* ih ih))))
-        k  (* (- 1.0 (* distortion-strength dist r2)) (+ 1.0 ca))]
+        kp (if lp-coef (lens-profile-k lp-coef (* (double lp-scale) (Math/sqrt (+ (* sx0 sx0) (* sy0 sy0))))) 1.0)
+        k  (* (- 1.0 (* distortion-strength dist r2)) kp (+ 1.0 ca))]
     [(* sx0 k) (* sy0 k)]))
 
 (defn- fill-zoom
@@ -141,9 +171,13 @@
   (let [rot (long (mod (long (get settings :rotate 0)) 4))
         [fw fh] (frame-size iw ih rot)
         th (Math/toRadians (setting settings :angle))
-        ca-r (* ca-strength (setting settings :ca-red))
-        ca-b (* ca-strength (setting settings :ca-blue))]
-    {:iw (double iw) :ih (double ih) :fw (double fw) :fh (double fh) :rot rot
+        lp   (:lens-profile settings)
+        [lp-kr lp-kb] (:ca lp)
+        ca-r (+ (* ca-strength (setting settings :ca-red)) (if lp-kr (- (double lp-kr) 1.0) 0.0))
+        ca-b (+ (* ca-strength (setting settings :ca-blue)) (if lp-kb (- (double lp-kb) 1.0) 0.0))]
+    {:lp-coef (when lp (profile-coefficients lp))
+     :lp-scale (when lp (profile-rho-scale lp (double iw) (double ih)))
+     :iw (double iw) :ih (double ih) :fw (double fw) :fh (double fh) :rot rot
      :cos-t (Math/cos th) :sin-t (Math/sin th)
      :flip-h? (boolean (:flip settings)) :flip-v? (boolean (:flip-v settings))
      :pv (setting settings :persp-v) :ph (setting settings :persp-h) :dist (setting settings :distortion)
@@ -197,6 +231,9 @@
           flip-v? (boolean (:flip-v settings))
           persp? (or (not (zero? pv)) (not (zero? ph)))
           lens?  (not (zero? dist))
+          ^doubles lp-coef (:lp-coef params)
+          lp?    (some? lp-coef)
+          lp-scale (double (or (:lp-scale params) 0.0))
           ca?    (or (not (zero? ca-r)) (not (zero? ca-b)))
           iw     (double width) ih (double height)
           cx0    (double cx) cy0 (double cy)
@@ -224,7 +261,8 @@
                     sx0 (case rot 0 rx 1 ry 2 (- rx) (- ry))
                     sy0 (case rot 0 ry 1 (- rx) 2 (- ry) rx)
                     ;; lens distortion
-                    k   (if lens? (- 1.0 (* distortion-strength dist (* (+ (* sx0 sx0) (* sy0 sy0)) inv-r2))) 1.0)
+                    k   (* (if lens? (- 1.0 (* distortion-strength dist (* (+ (* sx0 sx0) (* sy0 sy0)) inv-r2))) 1.0)
+                           (if lp? (lens-profile-k lp-coef (* lp-scale (Math/sqrt (+ (* sx0 sx0) (* sy0 sy0))))) 1.0))
                     sx  (* sx0 k) sy (* sy0 k)
                     o   (* 3 i)]
                 (if ca?

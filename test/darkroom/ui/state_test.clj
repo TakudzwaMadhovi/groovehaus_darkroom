@@ -1,6 +1,10 @@
 (ns darkroom.ui.state-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [darkroom.catalog :as cat]
+            [darkroom.imaging.core]
+            [darkroom.imaging.exif]
+            [darkroom.imaging.export]
+            [darkroom.imaging.lens]
             [darkroom.ui.state :as st])
   (:import (java.io File)
            (java.nio.file Files)
@@ -311,3 +315,28 @@
       (is (= :develop (:view @st/state)) "a hot-folder import does not change the view"))
     (st/stop-watching!)
     (is (nil? (:watch @st/state)))))
+
+(deftest lens-profile-from-the-database
+  (let [d (tmp-dir)
+        img (darkroom.imaging.core/image 8 8 (int-array 64 (unchecked-int 0xFF808080)))
+        tags {:make "NIKON" :lens-model "Nikkor 50mm f/1.8" :focal-length [50 1] :focal-length-35mm 50}
+        f (darkroom.imaging.export/save! img {:dir (.getPath d) :name "lensy" :format :jpeg
+                                              :exif (darkroom.imaging.exif/exif-block tags {})})
+        db (darkroom.imaging.lens/parse-database
+             (.getBytes (str "<lensdatabase><lens><maker>Nikon</maker><model>Nikkor 50mm f/1.8</model><cropfactor>1</cropfactor>"
+                             "<calibration><distortion model=\"poly3\" focal=\"50\" k1=\"-0.02\"/></calibration></lens></lensdatabase>") "UTF-8"))]
+    (st/create-shoot! "L" [(.getPath f)])
+    (reset! st/lens-db [])
+    (is (nil? (st/apply-lens-profile!)) "no database yet")
+    (is (nil? (:lens-profile (st/cur-adj @st/state))))
+    (reset! st/lens-db db)
+    (let [p (st/apply-lens-profile!)]
+      (is (= "Nikon Nikkor 50mm f/1.8" (:name p)))
+      (is (= p (:lens-profile (st/cur-adj @st/state))))
+      (is (= "LENS PROFILE" (:label (last (:history (cat/frame (:catalog @st/state) (.getPath f))))))))
+    (st/clear-lens-profile!)
+    (is (nil? (:lens-profile (st/cur-adj @st/state))))
+    (testing "a lens that is not in the database"
+      (reset! st/lens-db (darkroom.imaging.lens/parse-database (.getBytes "<lensdatabase/>" "UTF-8")))
+      (is (nil? (st/apply-lens-profile!))))
+    (reset! st/lens-db [])))

@@ -396,6 +396,18 @@
         flip-v (w/pill "FLIP VERTICAL" (fn [] (st/set-adj! :flip-v (not (:flip-v (st/cur-adj @st/state)))) (st/commit! "FLIP VERTICAL")) "sm")
         left   (w/pill "↺ 90°" (fn [] (turn! -1)) "sm")
         right  (w/pill "↻ 90°" (fn [] (turn! 1)) "sm")
+        lens-name (w/tlabel "" :normal "sys-10" "faint")
+        lens-auto (doto (w/pill "AUTO LENS PROFILE" (fn [] (st/apply-lens-profile!)) "sm")
+                    (w/set-base-a11y! "Apply the lens profile for this photo's lens"))
+        lens-off  (doto (w/pill "PROFILE OFF" (fn [] (st/clear-lens-profile!)) "sm")
+                    (w/set-base-a11y! "Remove the lens profile"))
+        lens-db   (doto (w/pill "LENS DATABASE…" (fn []
+                                                    (let [ch (doto (javafx.stage.DirectoryChooser.)
+                                                               (.setTitle "Folder of lensfun XML files (the db folder)"))]
+                                                      (when-let [d (.showDialog ch (first (javafx.stage.Window/getWindows)))]
+                                                        (st/load-lens-db! d))))
+                                  "sm")
+                    (w/set-base-a11y! "Choose the folder of lensfun lens profile files"))
         reset  (w/button (theme/tracked "RESET CROP" :normal)
                          (fn [] (st/set-adj! :crop nil) (st/set-adj! :aspect "orig") (st/commit! "CROP RESET"))
                          "text-btn" "quiet")]
@@ -408,6 +420,9 @@
                    (:node angle)
                    (w/tlabel "CROP" :wide "sys" "dim") (apply w/vbox 18 (map :node rect))
                    reset
+                   (w/tlabel "LENS PROFILE" :wide "sys" "dim")
+                   (doto (FlowPane. 8.0 8.0) (.. getChildren (addAll (java.util.Arrays/asList (into-array javafx.scene.Node [lens-auto lens-off lens-db])))))
+                   lens-name
                    (w/tlabel "PERSPECTIVE & LENS" :wide "sys" "dim") (apply w/vbox 18 (map :node lens)))
      :sync! (fn [adj]
               ((:set-value! angle) (:angle adj))
@@ -417,7 +432,12 @@
               (let [a (frame-aspect)
                     [x y w h] (geometry/crop-fractions adj a 1.0)]
                 (doseq [{:keys [i set-value!]} rect] (set-value! (* 100.0 (nth [x y w h] i)))))
-              (doseq [{:keys [key set-value!]} lens] (set-value! (get adj key))))}))
+              (doseq [{:keys [key set-value!]} lens] (set-value! (get adj key)))
+              (let [p (:lens-profile adj)]
+                (w/set-on! lens-off (boolean p))
+                (.setText lens-name (theme/tracked (cond p (str "ACTIVE: " (.toUpperCase ^String (:name p)))
+                                                         (empty? @st/lens-db) "NO LENS DATABASE LOADED"
+                                                         :else (str (count @st/lens-db) " LENSES IN DATABASE")) :normal))))}))
 
 (defn- row-button
   "A full-width list row: `title` on the left, `action-text` on the right."

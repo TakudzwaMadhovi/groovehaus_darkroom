@@ -34,7 +34,7 @@
   [[:datetime-original 0x9003 :ascii] [:lens-make 0xA433 :ascii] [:lens-model 0xA434 :ascii]
    [:exposure-time 0x829A :rational] [:f-number 0x829D :rational]
    [:focal-length 0x920A :rational] [:exposure-bias 0x9204 :srational]
-   [:iso 0x8827 :short]])
+   [:iso 0x8827 :short] [:focal-length-35mm 0xA405 :short]])
 
 (defn- rational [^Rational r] [(.getNumerator r) (.getDenominator r)])
 
@@ -42,7 +42,7 @@
   "The camera metadata worth carrying into an export, as a map (any of :make
   :model :software :datetime :artist :copyright :datetime-original :lens-make
   :lens-model :exposure-time :f-number :focal-length :exposure-bias [n d]
-  rationals, :iso). Works for JPEG and RAW. Missing or unreadable metadata
+  rationals, :iso, :focal-length-35mm). Works for JPEG and RAW. Missing or unreadable metadata
   yields {}."
   [file]
   (try

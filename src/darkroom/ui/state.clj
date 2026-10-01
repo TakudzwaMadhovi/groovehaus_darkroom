@@ -26,9 +26,11 @@
     :watch     folder being watched for new frames (hot folder), or nil
     :meta-rev  bumped when camera metadata finishes loading (re-sorts/re-searches)"
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [darkroom.catalog :as cat]
             [darkroom.imaging.browser :as browser]
             [darkroom.imaging.exif :as exif]
+            [darkroom.imaging.lens :as lens]
             [darkroom.imaging.local :as local]
             [darkroom.imaging.watch :as watch]
             [darkroom.imaging.xmp :as xmp])
@@ -474,6 +476,57 @@
         (save-soon!)
         (count ps)))))
 
+;; ------------------------------------------------------------- lens profiles
+
+(defonce lens-db (atom []))
+
+(defn load-lens-db!
+  "Reads the lensfun XML files in `dir` on a background thread, remembers the
+  folder in the catalog, and toasts the number of lenses found."
+  [^File dir]
+  (update-catalog! assoc :lens-db-dir (.getPath dir))
+  (doto (Thread. ^Runnable
+                 (fn []
+                   (let [db (lens/load-database dir)]
+                     (reset! lens-db db)
+                     (run-ui! #(do (swap! state update :meta-rev inc)
+                                   (toast! (if (seq db) (str (count db) " LENSES LOADED") "NO LENS PROFILES FOUND IN THAT FOLDER"))))))
+                 "darkroom-lens-db")
+    (.setDaemon true) (.start)))
+
+(defn load-saved-lens-db!
+  "At startup: reloads the lens database from the folder the catalog remembers."
+  []
+  (when-let [d (:lens-db-dir (:catalog @state))]
+    (let [f (File. ^String d)]
+      (when (.isDirectory f)
+        (doto (Thread. ^Runnable (fn [] (reset! lens-db (lens/load-database f))) "darkroom-lens-db")
+          (.setDaemon true) (.start))))))
+
+(defn apply-lens-profile!
+  "Looks the current frame's lens up in the lens database and applies its
+  distortion / CA profile (one history step). Returns the profile, or nil after
+  saying why there is none."
+  []
+  (when-let [p (:cur @state)]
+    (let [tags (or (meta-of p) (exif/read-tags p))
+          prof (lens/profile-for @lens-db tags)
+          fail! (fn [msg] (toast! msg) nil)]
+      (cond
+        (empty? @lens-db) (fail! "LOAD A LENS DATABASE FIRST")
+        (str/blank? (:lens-model tags)) (fail! "THIS FILE DOES NOT NAME ITS LENS")
+        (nil? (:focal-length tags)) (fail! "THIS FILE HAS NO FOCAL LENGTH")
+        (nil? prof) (fail! (str "NO PROFILE FOR " (str/upper-case (:lens-model tags))))
+        :else (do (set-adj! :lens-profile prof)
+                  (commit! "LENS PROFILE")
+                  (toast! (str "APPLIED " (str/upper-case (:name prof))))
+                  prof)))))
+
+(defn clear-lens-profile! []
+  (when (:lens-profile (cur-adj @state))
+    (set-adj! :lens-profile nil)
+    (commit! "LENS PROFILE OFF")))
+
 ;; ---------------------------------------------------------------- hot folder
 
 (defonce ^:private stop-watch (atom nil))
@@ -554,7 +607,8 @@
   (let [c (cat/load! @catalog-file)
         s (first (:shoots c))]
     (reset! seen-mtime (.lastModified ^File @catalog-file))
-    (swap! state assoc :catalog c :shoot (:id s) :cur (first (:paths s)))))
+    (swap! state assoc :catalog c :shoot (:id s) :cur (first (:paths s)))
+    (load-saved-lens-db!)))
 
 (defn open-file!
   "Makes sure `file` is in a shoot named after its folder, selects it and opens

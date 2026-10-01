@@ -67,6 +67,21 @@ green / blue label · `⌘Z` undo · `⌘⇧Z` or `⌘Y` redo · `⌘⇧C` / `�
 `J` clipping view · `N` survey · `G` Library · `D` Develop · `↵` open (Library).
 (`⌘` is `Ctrl` on Windows and Linux.) Double-click or click a slider's label to reset it.
 
+### Lens profiles
+
+CROP tab → LENS PROFILE. Choose the `db` folder of a [lensfun](https://lensfun.github.io)
+checkout (`LENS DATABASE…`; the open calibration collection used by darktable and
+RawTherapee, not bundled here) and `AUTO LENS PROFILE` looks the photo's lens up by the
+name in its EXIF, picks the calibration for its sensor size and focal length, and corrects
+distortion (poly3, poly5 and ptlens models) and linear lateral chromatic aberration. The
+maths follows lensfun's own source: Hugin-normalised coefficients are rescaled into focal-length
+units, calibrations are interpolated between focal lengths with the same Hermite spline,
+and the 35 mm-equivalent focal length in the EXIF gives the crop factor. It is a regular
+adjustment (one history step, `PROFILE OFF` removes it) and stacks with the manual
+distortion and fringe sliders. Not implemented: vignetting, the ACM and poly3 TCA models,
+lens-centre offsets, and matching by anything but the EXIF lens name (a lens whose name
+the camera writes differently from the database finds no profile; the toast says so).
+
 ### Hot folder and sharing a catalog
 
 - `WATCH FOLDER` (Library toolbar) imports every image that appears in a folder into the
@@ -112,6 +127,7 @@ by path, modification time and size.
 | `darkroom.imaging.histogram` / `export` / `browser` | Histogram, JPEG / PNG / 16-bit TIFF / WebP writers (ICC, EXIF), folder scan + thumbnails |
 | `darkroom.imaging.output` | File-name templates, output sharpening, watermark, metadata modes, rendering one or many frames to disk |
 | `darkroom.catalog` | Pure library model: shoots, frames, ratings, reject flags, colour labels, keywords, notes, adjustments, undo / redo history, snapshots, user presets, virtual copies, copy / paste, search and sort; EDN persistence |
+| `darkroom.imaging.lens` / `watch` | lensfun profile lookup, interpolation and rescaling; hot-folder watcher |
 | `darkroom.imaging.xmp` / `paths` / `thumbcache` | XMP sidecar read / write; virtual-copy paths (`file#vcN`); on-disk thumbnail cache |
 | `darkroom.ui.state` | App state atom and actions |
 | `darkroom.ui.theme` / `widgets` / `darkroom.css` | Fonts, stylesheet, tracked text, buttons, slider |
