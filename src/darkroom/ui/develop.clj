@@ -5,12 +5,14 @@
             [darkroom.imaging.auto :as auto]
             [darkroom.imaging.crop :as crop]
             [darkroom.imaging.histogram :as histogram]
+            [darkroom.imaging.local :as local]
             [darkroom.imaging.develop :as develop]
             [darkroom.imaging.geometry :as geometry]
             [darkroom.imaging.pipeline :as pipeline]
             [darkroom.ui.canvas :as canvas]
             [darkroom.ui.crop-overlay :as crop-overlay]
             [darkroom.ui.curve :as curve]
+            [darkroom.ui.local-overlay :as local-overlay]
             [darkroom.ui.histogram-view :as histogram-view]
             [darkroom.ui.state :as st]
             [darkroom.ui.theme :as theme]
@@ -64,7 +66,7 @@
 
 (def ^:private tab-labels
   [[:basic "BASIC"] [:detail "DETAIL"] [:color "COLOR"] [:curve "CURVE"] [:look "LOOK"] [:crop "CROP"]
-   [:presets "PRESETS"] [:history "HISTORY"]])
+   [:local "LOCAL"] [:spots "SPOTS"] [:presets "PRESETS"] [:history "HISTORY"]])
 
 (def ^:private whole-number-keys
   "Settings whose sliders step in whole numbers and are stored as integers."
@@ -194,6 +196,192 @@
               ((:sync! base) adj)
               (w/set-on! pick-btn (= :wb (:pick @st/state))))}))
 
+
+;; -------------------------------------------------------------------- local
+
+(def ^:private local-adjust-specs
+  "[key label min max step opts] for a layer's adjustment sliders."
+  [[:exposure "EXPOSURE" -2 2 0.01 {}]
+   [:contrast "CONTRAST" -1 1 0.01 {:pct? true}]
+   [:highlights "HIGHLIGHTS" -1 1 0.01 {:pct? true}]
+   [:shadows "SHADOWS" -1 1 0.01 {:pct? true}]
+   [:whites "WHITES" -1 1 0.01 {:pct? true}]
+   [:blacks "BLACKS" -1 1 0.01 {:pct? true}]
+   [:temp "TEMPERATURE" -1 1 0.01 {:pct? true}]
+   [:tint "TINT" -1 1 0.01 {:pct? true}]
+   [:saturation "SATURATION" -1 1 0.01 {:pct? true}]
+   [:vibrance "VIBRANCE" -1 1 0.01 {:pct? true}]
+   [:texture "TEXTURE" -1 1 0.01 {:pct? true}]
+   [:clarity "CLARITY" -1 1 0.01 {:pct? true}]
+   [:sharpen "SHARPEN" 0 100 1 {:decimals 0}]])
+
+(defn- layer-slider
+  "A slider bound to `(get-in layer path)` of layer `id`. Returns the slider-row map."
+  [id label path lo hi step opts default]
+  (w/slider-row (merge {:label label :min lo :max hi :step step :default default :value (double default)
+                        :on-input  (fn [v] (st/update-layer! id #(assoc-in % path (if (:decimals opts) (long v) v))))
+                        :on-commit (fn [] (st/commit! (str "LOCAL " label)))
+                        :on-reset  (fn [] (st/update-layer! id #(assoc-in % path default)) (st/commit! (str "LOCAL " label " RESET")))}
+                       opts)))
+
+(defn- toggle-pill [label on-pick a11y]
+  (doto (w/pill label on-pick "sm") (w/set-base-a11y! a11y)))
+
+(defn- pill-flow
+  "Pills laid out in a wrapping row (so they never get clipped in the narrow panel)."
+  [& nodes]
+  (let [fp (FlowPane. 8.0 8.0)]
+    (doseq [n nodes] (.add (.getChildren fp) n))
+    fp))
+
+(defn- layer-editor
+  "Controls for layer `layer`: returns {:node :sync! (fn [layer])}."
+  [layer]
+  (let [id (:id layer)
+        adj-rows (vec (for [[k label lo hi step opts] local-adjust-specs]
+                        (assoc (layer-slider id label [:adj k] lo hi step opts 0.0) :path [:adj k])))
+        amount   (assoc (layer-slider id "AMOUNT" [:amount] 0 1 0.01 {:pct? true} 1.0) :path [:amount])
+        feather  (assoc (layer-slider id "FEATHER" [:feather] 0 1 0.01 {:pct? true} 0.0) :path [:feather])
+        invert   (toggle-pill "INVERT" (fn [] (st/update-layer! id #(update % :invert not)) (st/commit! "INVERT MASK")) "Invert the mask")
+        visible  (toggle-pill "HIDE" (fn [] (st/update-layer! id #(update % :visible (fn [v] (false? v)))) (st/commit! "TOGGLE LAYER")) "Hide this layer")
+        delete   (toggle-pill "DELETE" (fn [] (st/delete-layer! id)) "Delete this layer")
+        show     (toggle-pill "SHOW MASK" (fn [] (swap! st/state update :local-mask not)) "Show the mask on the photo")
+        ;; range limits
+        luma-on  (toggle-pill "LIMIT BY LIGHT" nil "Limit this layer to a range of brightness")
+        luma-lo  (assoc (layer-slider id "FROM" [:range :luma :lo] 0 1 0.01 {:pct? true} 0.0) :path [:range :luma :lo])
+        luma-hi  (assoc (layer-slider id "TO" [:range :luma :hi] 0 1 0.01 {:pct? true} 1.0) :path [:range :luma :hi])
+        luma-sm  (assoc (layer-slider id "SOFTNESS" [:range :luma :smooth] 0 0.5 0.01 {:pct? true} 0.1) :path [:range :luma :smooth])
+        col-on   (toggle-pill "LIMIT BY COLOUR" nil "Limit this layer to a range of colours")
+        col-hue  (assoc (layer-slider id "HUE" [:range :color :hue] 0 360 1 {:decimals 0} 0) :path [:range :color :hue])
+        col-rng  (assoc (layer-slider id "RANGE" [:range :color :range] 1 90 1 {:decimals 0} 20) :path [:range :color :range])
+        ;; brush
+        tool-row (fn [label k lo hi step opts default]
+                   (w/slider-row (merge {:label label :min lo :max hi :step step :default default :value (double default)
+                                         :on-input (fn [v] (st/set-tool! k v))}
+                                        opts)))
+        b-size   (tool-row "BRUSH SIZE" :brush-size 0.005 0.15 0.005 {:pct? true} 0.04)
+        b-feath  (tool-row "BRUSH FEATHER" :brush-feather 0 1 0.01 {:pct? true} 0.5)
+        b-flow   (tool-row "BRUSH FLOW" :brush-flow 0.05 1 0.01 {:pct? true} 1.0)
+        erase    (toggle-pill "ERASE" (fn [] (swap! st/state update-in [:tool :erase] not)) "Erase brush strokes")
+        clear    (toggle-pill "CLEAR STROKES" (fn [] (st/update-layer! id #(assoc-in % [:shape :strokes] [])) (st/commit! "CLEAR STROKES")) "Remove all brush strokes")
+        hint     (case (:type layer)
+                   :linear  "DRAG THE END POINTS ON THE PHOTO"
+                   :radial  "DRAG THE CENTRE OR SIDE HANDLES"
+                   :brush   "PAINT ON THE PHOTO"
+                   :subject "DRAG A BOX AROUND THE SUBJECT"
+                   :sky     "SELECTED FROM COLOUR AND BRIGHTNESS (APPROXIMATE)"
+                   :range   "AFFECTS THE WHOLE PHOTO, LIMITED BY THE RANGES BELOW"
+                   "")
+        limits? (atom (boolean (or (:luma (:range layer)) (:color (:range layer)))))]
+    (let [range-rows [luma-lo luma-hi luma-sm col-hue col-rng]
+          all-rows   (concat adj-rows [amount feather] range-rows)
+          shell      (w/vbox 18
+                             (w/tlabel hint :normal "sys-10" "faint")
+                             (pill-flow show invert visible delete)
+                             (when (= :brush (:type layer)) (w/vbox 14 (:node b-size) (:node b-feath) (:node b-flow) (pill-flow erase clear)))
+                             (w/tlabel "ADJUST" :wide "sys" "dim")
+                             (apply w/vbox 18 (map :node adj-rows))
+                             (:node amount) (:node feather)
+                             (w/tlabel "LIMITS" :wide "sys" "dim")
+                             (pill-flow luma-on col-on)
+                             (w/vbox 14 (:node luma-lo) (:node luma-hi) (:node luma-sm))
+                             (w/vbox 14 (:node col-hue) (:node col-rng)))
+          set-range! (fn [k v on?]
+                       (st/update-layer! id (fn [l] (if on? (assoc-in l [:range k] v) (update l :range dissoc k))))
+                       (st/commit! (str "LIMIT " (name k))))]
+      (.setOnAction luma-on (w/handler (fn [_] (set-range! :luma {:lo 0.5 :hi 1.0 :smooth 0.1} (not (get-in (st/selected-layer) [:range :luma]))))))
+      (.setOnAction col-on  (w/handler (fn [_] (set-range! :color {:hue 0 :range 20} (not (get-in (st/selected-layer) [:range :color]))))))
+      {:node shell
+       :sync! (fn [l]
+                (doseq [{:keys [path set-value!]} all-rows]
+                  (when-let [v (get-in l path)] (set-value! v)))
+                (w/set-on! invert (boolean (:invert l)))
+                (w/set-on! visible (false? (:visible l)))
+                (w/set-on! show (boolean (:local-mask @st/state)))
+                (w/set-on! erase (boolean (get-in @st/state [:tool :erase])))
+                (w/set-on! luma-on (boolean (get-in l [:range :luma])))
+                (w/set-on! col-on (boolean (get-in l [:range :color])))
+                (let [t (:tool @st/state)]
+                  ((:set-value! b-size) (:brush-size t)) ((:set-value! b-feath) (:brush-feather t)) ((:set-value! b-flow) (:brush-flow t))))})))
+
+(defn- local-body
+  "LOCAL tab: add a layer, pick one from the list, edit it."
+  []
+  (let [root   (w/vbox 16)
+        adders (FlowPane. 8.0 8.0)
+        list-box (w/vbox 0)
+        editor (w/vbox 0)
+        sig    (atom nil)
+        cur-editor (atom nil)]
+    (doseq [t [:linear :radial :brush :range :subject :sky]]
+      (.add (.getChildren adders)
+            (doto (w/pill (str "+ " (clojure.string/upper-case (name t))) (fn [] (st/add-layer! t)) "sm")
+              (w/set-base-a11y! (str "Add " (local/type-labels t))))))
+    (w/add! root (w/tlabel "ADD A MASK" :wide "sys" "dim") adders (w/tlabel "MASKS" :wide "sys" "dim") list-box editor)
+    {:node root
+     :sync! (fn [adj]
+              (let [layers (vec (:local adj)) sel (:local-sel @st/state)
+                    new-sig [(mapv #(select-keys % [:id :type :visible]) layers) sel (mapv local/layer-title layers)]]
+                (when (not= new-sig @sig)
+                  (reset! sig new-sig)
+                  (w/keep-focus!
+                    root
+                    (fn []
+                      (w/clear! list-box) (w/clear! editor)
+                      (when (empty? layers)
+                        (w/add! list-box (w/label "no masks yet: add one above, then adjust it." "editorial")))
+                      (doseq [l layers]
+                        (let [b (w/button nil (fn [] (st/select-layer! (:id l))) "text-btn" "short")
+                              on? (= sel (:id l))]
+                          (.setGraphic b (w/hbox 12 (w/tlabel (format "%02d" (:id l)) :normal "sys-12" "sys" "faint")
+                                                 (w/tlabel (local/layer-title l) :normal "sys-12" "sys" (if on? "bone" "dim"))))
+                          (.setText b "")
+                          (w/a11y! b (str "Layer " (:id l) ", " (local/layer-title l) (when on? ", selected") (when (false? (:visible l)) ", hidden")))
+                          (w/add! list-box b)))
+                      (reset! cur-editor
+                              (when-let [l (first (filter #(= sel (:id %)) layers))]
+                                (let [e (layer-editor l)] (w/add! editor (:node e)) e))))))
+                (when-let [e @cur-editor]
+                  (when-let [l (first (filter #(= (:local-sel @st/state) (:id %)) (:local adj)))]
+                    ((:sync! e) l)))))}))
+
+(defn- spots-body
+  "SPOTS tab: heal or clone small blemishes by clicking the photo."
+  []
+  (let [root (w/vbox 18)
+        modes (FlowPane. 8.0 8.0)
+        heal  (toggle-pill "HEAL" (fn [] (st/set-tool! :spot-mode :heal)) "Heal spots")
+        clone (toggle-pill "CLONE" (fn [] (st/set-tool! :spot-mode :clone)) "Clone spots")
+        size  (w/slider-row {:label "SIZE" :min 0.004 :max 0.08 :step 0.002 :default 0.02 :value 0.02 :pct? true
+                             :on-input (fn [v] (st/set-tool! :spot-size v))})
+        list-box (w/vbox 0)
+        clear (w/button (theme/tracked "CLEAR ALL SPOTS" :normal) (fn [] (st/clear-spots!)) "text-btn" "quiet")
+        sig (atom nil)]
+    (.add (.getChildren modes) heal) (.add (.getChildren modes) clone)
+    (w/add! root (w/tlabel "CLICK THE PHOTO TO REMOVE A BLEMISH" :normal "sys-10" "faint")
+            (w/tlabel "MODE" :wide "sys" "dim") modes (:node size)
+            (w/tlabel "SPOTS" :wide "sys" "dim") list-box clear)
+    {:node root
+     :sync! (fn [adj]
+              (let [t (:tool @st/state)]
+                (w/set-on! heal (= :heal (:spot-mode t))) (w/set-on! clone (= :clone (:spot-mode t)))
+                ((:set-value! size) (:spot-size t)))
+              (let [sp (vec (:spots adj))]
+                (when (not= sp @sig)
+                  (reset! sig sp)
+                  (w/keep-focus!
+                    list-box
+                    (fn []
+                      (w/clear! list-box)
+                      (when (empty? sp) (w/add! list-box (w/label "no spots yet." "editorial")))
+                      (doseq [[i s] (map-indexed vector sp)]
+                        (let [b (w/button nil (fn [] (st/delete-spot! i)) "text-btn" "short")]
+                          (.setGraphic b (w/hbox 12 (w/tlabel (format "%02d" (inc i)) :normal "sys-12" "sys" "faint")
+                                                 (w/tlabel (str (clojure.string/upper-case (name (:mode s))) " · DELETE") :normal "sys-12" "sys" "dim")))
+                          (.setText b "")
+                          (w/a11y! b (str "Spot " (inc i) ", " (name (:mode s)) ", activate to delete"))
+                          (w/add! list-box b))))))))}))
+
 (defn- crop-body []
   (let [angle  (first (sliders-for :crop))
         lens   (sliders-for :lens)
@@ -321,6 +509,8 @@
     :basic   (basic-body)
     (:detail :look) (basic-like-body tab)
     :color   (color-body)
+    :local   (local-body)
+    :spots   (spots-body)
     :crop    (crop-body)
     :curve   (curve-body)
     :presets (presets-body)
@@ -370,6 +560,7 @@
         rgb-btn  (doto (w/pill "RGB" (fn [] (swap! st/state update :hist-rgb not)) "sm") (w/set-base-a11y! "Show red, green and blue in the histogram"))
         clip-btn (doto (w/pill "CLIP" (fn [] (swap! st/state update :clip-view not)) "sm") (w/set-base-a11y! "Show clipped pixels on the photo (J)"))
         overlay  (crop-overlay/create iv)
+        local-ov (local-overlay/create iv)
         tabs     (doto (FlowPane. 14.0 0.0) (.setPadding (Insets. 0 24 0 24)))
         tab-btns (vec (for [[k l] tab-labels]
                         [k (doto (w/button (theme/tracked l :normal) (fn [] (swap! st/state assoc :tab k)) "tab-btn")
@@ -387,7 +578,7 @@
     (.bind (.fitWidthProperty iv) (.subtract (.widthProperty canvas) 40))
     (.bind (.fitHeightProperty iv) (.subtract (.heightProperty canvas) 40))
     (w/classes! canvas "ground")
-    (w/add! canvas iv (:node overlay) loading)
+    (w/add! canvas iv (:node overlay) (:node local-ov) loading)
     (w/classes! body-box "panel")
     (.setStyle body-scroll "-fx-background-color: transparent;")
     (apply w/add! tabs (map second tab-btns))
@@ -464,6 +655,7 @@
                    (.add (.getChildren body-box) (:node @body)))
                  (when (and @body adj) ((:sync! @body) adj))
                  ((:refresh! overlay) s)
+                 ((:refresh! local-ov) s)
                  ((:set-mode! hist) (if (:hist-rgb s) :rgb :luma))
                  (w/set-on! rgb-btn (boolean (:hist-rgb s)))
                  (w/set-on! clip-btn (boolean (:clip-view s)))

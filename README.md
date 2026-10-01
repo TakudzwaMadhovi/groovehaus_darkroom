@@ -36,7 +36,10 @@ is stored as EDN in the per-user data folder
   edge masking, luminance and colour noise reduction), COLOR (8-band HSL mixer, split
   toning with balance), CURVE (RGB and per-channel red/green/blue curves), LOOK (B&W,
   fade, grain, vignette), CROP (interactive crop rectangle with aspect lock, straighten,
-  90° turns, flips, perspective, lens distortion, chromatic aberration), PRESETS, HISTORY;
+  90° turns, flips, perspective, lens distortion, chromatic aberration), LOCAL (masked
+  adjustment layers: linear/radial gradients, brush, luminance/colour range, subject, sky;
+  13 adjustments each, amount, feather, invert, limits, mask preview), SPOTS (heal or clone
+  blemishes by clicking), PRESETS, HISTORY;
   filmstrip "THE ROLL".
 - **Export** (`⌘E`): JPEG/PNG, long edge 1080 / 2048 / full, colour space (sRGB,
   Display P3, Adobe RGB), JPEG quality, destination folder. Renders the full-resolution
@@ -55,6 +58,9 @@ Shortcuts: `⌘I` import · `⌘E`/`E` export · `Esc` close · `\` hold = befor
 | `darkroom.imaging.scene` | Float scene-linear images in the working space; conversion from 8-bit sRGB / LibRaw 16-bit and to 8/16-bit output spaces; LUT helpers; linear-light box downscale |
 | `darkroom.imaging.geometry` | Crop, straighten, quarter turns, flips, perspective, lens distortion, CA correction in one resampling pass with an exact fill-zoom; resize |
 | `darkroom.imaging.auto` | Auto tone (exposure/contrast/highlights/shadows/whites/blacks), auto white balance, white balance from a picked colour (Newton solve on the temperature/tint matrix) |
+| `darkroom.imaging.mask` | Mask planes: gradients, brush strokes, luminance/colour range, GrabCut subject and heuristic sky selection |
+| `darkroom.imaging.local` | Local-adjustment layers (mask + limits + tone/detail adjustments blended through the mask); layer helpers |
+| `darkroom.imaging.heal` | Spot clone and heal (mean-value cloning), automatic source patch |
 | `darkroom.imaging.crop` | The crop rectangle's drag maths (move, resize, draw, aspect lock, hit testing) |
 | `darkroom.imaging.core` | 8-bit ARGB pixel helpers: load, `fit`, `orient`, legacy brightness/contrast/gamma ops |
 | `darkroom.imaging.develop` | Tone engine on scene images: linear exposure + white balance, then perceptual-domain edits (whites/blacks, shadows/highlights, contrast, curves, HSL, vibrance, split toning, B&W, vignette, grain) |
@@ -66,7 +72,7 @@ Shortcuts: `⌘I` import · `⌘E`/`E` export · `Esc` close · `\` hold = befor
 | `darkroom.catalog` | Pure library model: shoots, frames, ratings, adjustments, history, presets; EDN persistence |
 | `darkroom.ui.state` | App state atom and actions |
 | `darkroom.ui.theme` / `widgets` / `darkroom.css` | Fonts, stylesheet, tracked text, buttons, slider |
-| `darkroom.ui.header` / `library` / `develop` / `curve` / `crop-overlay` / `export-overlay` / `app` | Views and wiring |
+| `darkroom.ui.header` / `library` / `develop` / `curve` / `crop-overlay` / `local-overlay` / `export-overlay` / `app` | Views and wiring |
 | `darkroom.ui.canvas` / `thumbs` | Background loading, rendering and thumbnail caches |
 
 ## Accessibility
@@ -119,6 +125,18 @@ Shortcuts: `⌘I` import · `⌘E`/`E` export · `Esc` close · `\` hold = befor
    wide-gamut monitor the preview is shown as sRGB.
 
 Alpha is not carried: images are treated as opaque photographs.
+
+## Local adjustments and spots: what they are, and are not
+
+- Masks and spots are positioned as fractions of the *cropped, turned* picture, so set the
+  crop first; changing it afterwards moves them with the frame, not with the content.
+- **Subject** and **sky** are classical image analysis (GrabCut from a box you draw;
+  colour + brightness + smoothness connected to the top edge), not trained models. They
+  work on clear subjects against distinct backgrounds and open skies; they do not
+  recognise people, hair or busy cloudscapes the way a neural network does.
+- **Heal** copies a nearby patch (chosen automatically) and blends its edge mismatch
+  smoothly; it cannot invent detail, so it is for dust and small blemishes, not for
+  removing large objects.
 
 ## Notes on the design port
 

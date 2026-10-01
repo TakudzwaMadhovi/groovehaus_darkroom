@@ -14,18 +14,22 @@
     :hist-rgb  histogram shows R, G, B instead of luma
     :clip-view paint clipped pixels on the canvas (red highlights, blue shadows)
     :pick      nil or :wb while the white-balance picker waits for a click
+    :local-sel id of the selected local-adjustment layer (LOCAL tab); :local-mask shows its mask
+    :tool      brush / spot settings {:brush-size :brush-feather :brush-flow :erase :spot-size :spot-mode}
     :exporting export overlay open?
     :fmt :size :q :cspace :export-dir   export options (cspace: :srgb :display-p3 :adobe-rgb)
     :adding / :toast            transient UI"
   (:require [clojure.java.io :as io]
             [darkroom.catalog :as cat]
-            [darkroom.imaging.browser :as browser])
+            [darkroom.imaging.browser :as browser]
+            [darkroom.imaging.local :as local])
   (:import (java.io File)
            (java.util.concurrent Executors ScheduledExecutorService ScheduledFuture ThreadFactory TimeUnit)))
 
 (defonce state
   (atom {:catalog cat/empty-catalog :view :library :shoot nil :cur nil :tab :basic
-         :lf :all :tsz 220 :before false :hist-rgb false :clip-view false :pick nil :exporting false :fmt :jpeg :size 2048 :q 90 :cspace :srgb
+         :lf :all :tsz 220 :before false :hist-rgb false :clip-view false :pick nil :local-sel nil :local-mask false
+         :tool {:brush-size 0.04 :brush-feather 0.5 :brush-flow 1.0 :erase false :spot-size 0.02 :spot-mode :heal} :exporting false :fmt :jpeg :size 2048 :q 90 :cspace :srgb
          :export-dir nil :adding false :toast nil}))
 
 ;; ------------------------------------------------------------- derivations
@@ -185,6 +189,60 @@
   [m]
   (when-let [p (:cur @state)]
     (swap! state update :catalog (fn [c] (reduce-kv (fn [c k v] (cat/set-adj c p k v)) c m)))))
+
+(declare commit!)
+
+(defn layers
+  "The current frame's local-adjustment layers."
+  ([] (layers @state))
+  ([st] (vec (:local (cur-adj st)))))
+
+(defn selected-layer
+  "The selected local-adjustment layer of the current frame, or nil."
+  ([] (selected-layer @state))
+  ([st] (let [id (:local-sel st)] (first (filter #(= id (:id %)) (layers st))))))
+
+(defn select-layer! [id] (swap! state assoc :local-sel id))
+
+(defn add-layer!
+  "Adds a new local-adjustment layer of `type` and selects it."
+  [type]
+  (let [ls (layers) id (local/next-id ls)]
+    (set-adj! :local (conj ls (local/new-layer type id)))
+    (select-layer! id)
+    (commit! (str "ADD " (local/type-labels type)))))
+
+(defn update-layer!
+  "Live change of layer `id` (no history entry until `commit!`): f maps the
+  layer to its new value."
+  [id f]
+  (set-adj! :local (mapv #(if (= id (:id %)) (f %) %) (layers))))
+
+(defn delete-layer! [id]
+  (set-adj! :local (vec (remove #(= id (:id %)) (layers))))
+  (when (= id (:local-sel @state)) (select-layer! nil))
+  (commit! "DELETE LAYER"))
+
+(defn spots [] (vec (:spots (cur-adj @state))))
+
+(defn add-spot!
+  "Adds a spot {:x :y :r :mode ...} (fractions of the cropped picture)."
+  [spot]
+  (set-adj! :spots (conj (spots) spot))
+  (commit! (if (= :clone (:mode spot)) "CLONE SPOT" "HEAL SPOT")))
+
+(defn delete-spot! [i]
+  (set-adj! :spots (vec (concat (take i (spots)) (drop (inc i) (spots)))))
+  (commit! "DELETE SPOT"))
+
+(defn clear-spots! []
+  (set-adj! :spots [])
+  (commit! "CLEAR SPOTS"))
+
+(defn set-tool!
+  "Sets one brush / spot tool setting, e.g. (set-tool! :brush-size 0.05)."
+  [k v]
+  (swap! state assoc-in [:tool k] v))
 
 (defn commit! [label]
   (when-let [p (:cur @state)] (update-catalog! cat/commit p label)))

@@ -6,6 +6,7 @@
   (:require [darkroom.catalog :as cat]
             [darkroom.imaging.geometry :as geometry]
             [darkroom.imaging.histogram :as histogram]
+            [darkroom.imaging.local :as local]
             [darkroom.imaging.loader :as loader]
             [darkroom.imaging.pipeline :as pipeline]
             [darkroom.imaging.scene :as scene]
@@ -81,9 +82,15 @@
                                   (fn []
                                     (when (current?)
                                       (try
-                                        (let [img  (scene/->argb ((:renderer sess) settings {:quality quality :scale (:scale sess)}))
-                                              hist (histogram/compute img)
-                                              fxi  (fx/->fx-image (if (:clip-view s) (histogram/clipping-overlay img) img))]
+                                        (let [sc    ((:renderer sess) settings {:quality quality :scale (:scale sess)})
+                                              img   (scene/->argb sc)
+                                              hist  (histogram/compute img)
+                                              shown (if (:clip-view s) (histogram/clipping-overlay img) img)
+                                              shown (if-let [l (and (:local-mask s) (= :local (:tab s))
+                                                                    (first (filter #(= (:local-sel s) (:id %)) (:local settings))))]
+                                                      (local/paint-mask shown (local/layer-mask sc l))
+                                                      shown)
+                                              fxi   (fx/->fx-image shown)]
                                           (when (current?)
                                             (Platform/runLater #(when (current?)
                                                                   (.setImage view fxi)

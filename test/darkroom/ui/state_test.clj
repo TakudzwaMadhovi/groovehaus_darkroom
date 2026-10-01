@@ -118,3 +118,66 @@
       (st/select! a)
       (st/move! 1)
       (is (= c (:cur @st/state)) "skips b, which the PICKS filter hides"))))
+
+
+;; --- local adjustments and spots ---------------------------------------------------------
+
+(deftest layers-add-select-update-delete
+  (let [[a] (shoot-with "a.png")]
+    (st/select! a)
+    (is (= [] (st/layers)))
+    (st/add-layer! :linear)
+    (st/add-layer! :brush)
+    (is (= [:linear :brush] (map :type (st/layers))))
+    (is (= [1 2] (map :id (st/layers))))
+    (is (= 2 (:local-sel @st/state)) "a new layer is selected")
+    (is (= :brush (:type (st/selected-layer))))
+    (testing "live edits do not add history; commit does"
+      (let [h0 (count (:history (cat/frame (:catalog @st/state) a)))]
+        (st/update-layer! 2 #(assoc-in % [:adj :exposure] 0.5))
+        (is (= 0.5 (get-in (st/selected-layer) [:adj :exposure])))
+        (is (= h0 (count (:history (cat/frame (:catalog @st/state) a)))))
+        (st/commit! "T")
+        (is (= (inc h0) (count (:history (cat/frame (:catalog @st/state) a)))))))
+    (testing "other layers are untouched by an edit"
+      (is (= {} (:adj (first (st/layers))))))
+    (st/select-layer! 1)
+    (st/delete-layer! 1)
+    (is (= [2] (map :id (st/layers))))
+    (is (nil? (:local-sel @st/state)) "deleting the selected layer clears the selection")
+    (is (nil? (st/selected-layer)))
+    (testing "ids stay unique after a delete"
+      (st/add-layer! :radial)
+      (is (= [2 3] (map :id (st/layers)))))
+    (testing "the frame counts as edited, and the layers are part of its saved adjustments"
+      (is (cat/edited? (:catalog @st/state) a))
+      (is (= 2 (count (:local (cat/adj (:catalog @st/state) a))))))))
+
+(deftest spots-add-and-remove
+  (let [[a] (shoot-with "a.png")]
+    (st/select! a)
+    (is (= [] (st/spots)))
+    (st/add-spot! {:x 0.2 :y 0.3 :r 0.02 :mode :heal})
+    (st/add-spot! {:x 0.6 :y 0.4 :r 0.03 :mode :clone})
+    (is (= [:heal :clone] (map :mode (st/spots))))
+    (st/delete-spot! 0)
+    (is (= [:clone] (map :mode (st/spots))))
+    (st/clear-spots!)
+    (is (= [] (st/spots)))
+    (is (>= (count (:history (cat/frame (:catalog @st/state) a))) 5) "each action is an undoable history step")))
+
+(deftest tool-settings
+  (st/set-tool! :brush-size 0.07)
+  (is (= 0.07 (get-in @st/state [:tool :brush-size])))
+  (st/set-tool! :spot-mode :clone)
+  (is (= :clone (get-in @st/state [:tool :spot-mode])))
+  (is (= 0.5 (get-in @st/state [:tool :brush-feather])) "others keep their values"))
+
+(deftest set-adjs-is-one-change
+  (let [[a] (shoot-with "a.png") n (atom 0)]
+    (st/select! a)
+    (add-watch st/state ::count (fn [& _] (swap! n inc)))
+    (st/set-adjs! {:exposure 0.4 :contrast 0.2 :tint -0.1})
+    (remove-watch st/state ::count)
+    (is (= 1 @n))
+    (is (= [0.4 0.2 -0.1] ((juxt :exposure :contrast :tint) (st/cur-adj @st/state))))))
