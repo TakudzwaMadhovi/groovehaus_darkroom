@@ -10,13 +10,31 @@
       (re-find #"(?i)win" os) "win"
       :else                   (if arm? "linux-aarch64" "linux"))))
 
+;; Bytedeco (JavaCPP) ships LibRaw natives per platform, selected by classifier.
+;; LibRaw has no linux-arm64 build.
+(def bytedeco-version "1.5.11")
+(def libraw-version (str "0.21.2-" bytedeco-version))
+
+(def bytedeco-platform
+  (let [os   (System/getProperty "os.name" "")
+        arch (System/getProperty "os.arch" "")
+        arm? (contains? #{"aarch64" "arm64"} arch)]
+    (cond
+      (re-find #"(?i)mac" os) (if arm? "macosx-arm64" "macosx-x86_64")
+      (re-find #"(?i)win" os) "windows-x86_64"
+      :else                   "linux-x86_64")))
+
 (defproject groovehaus-darkroom "0.1.0-SNAPSHOT"
   :description "Desktop image processing application (Clojure + JavaFX)"
   :min-lein-version "2.9.0"
   :dependencies [[org.clojure/clojure "1.12.0"]
                  ~['org.openjfx/javafx-base javafx-version :classifier javafx-platform]
                  ~['org.openjfx/javafx-graphics javafx-version :classifier javafx-platform]
-                 ~['org.openjfx/javafx-controls javafx-version :classifier javafx-platform]]
+                 ~['org.openjfx/javafx-controls javafx-version :classifier javafx-platform]
+                 [org.bytedeco/javacpp ~bytedeco-version]
+                 ~['org.bytedeco/javacpp bytedeco-version :classifier bytedeco-platform]
+                 [org.bytedeco/libraw ~libraw-version]
+                 ~['org.bytedeco/libraw libraw-version :classifier bytedeco-platform]]
   :main darkroom.main
   :resource-paths ["resources"]
   ;; headless AWT: ImageIO needs no Cocoa/AWT event loop, which can conflict

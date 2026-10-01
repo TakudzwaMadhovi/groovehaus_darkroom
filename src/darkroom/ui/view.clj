@@ -162,7 +162,8 @@
   (let [view     (doto (ImageView. (->fx-image source))
                    (.setPreserveRatio true)
                    (.setSmooth true))
-        center   (doto (BorderPane. view) (.setPadding (Insets. 10)))
+        ;; min/pref 0 so a large image never forces the window wider than the screen.
+        center   (doto (BorderPane. view) (.setPadding (Insets. 10)) (.setMinSize 0.0 0.0) (.setPrefSize 0.0 0.0))
         settings (atom (into {} (map (juxt :key :value)) controls))
         hist     (histogram-view/create)
         render!  (latest-wins-renderer view render-fn analyze-fn (:update! hist))

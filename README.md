@@ -8,6 +8,7 @@ Requires JDK 17+ and [Leiningen](https://leiningen.org).
 
     lein run                    # opens resources/sample.png
     lein run path/to/image.jpg  # opens another image
+    lein run path/to/photo.dng  # RAW: DNG, ARW, CR2/CR3, NEF, ORF, RAF, RW2, ...
     lein test
 
 JavaFX natives are picked automatically per OS/arch (see `project.clj`).
@@ -19,6 +20,8 @@ JavaFX natives are picked automatically per OS/arch (see `project.clj`).
 | `darkroom.imaging.core` | Pure pixel logic: load, `fit` (preview downscale), brightness, contrast, gamma, saturation. No UI imports. |
 | `darkroom.imaging.histogram` | `compute`: per-channel (R, G, B, luma) 256-bin counts. Pure logic. |
 | `darkroom.imaging.export` | `save!`: write JPEG (quality 1–100) or PNG (lossless), atomically. |
+| `darkroom.imaging.raw` | LibRaw (Bytedeco) RAW decoding: `decode-linear` -> 16-bit linear RGB, `linear->display` -> sRGB 8-bit. |
+| `darkroom.imaging.loader` | `load-image`: RAW files via LibRaw, everything else via ImageIO. |
 | `darkroom.imaging.pipeline` | Registry mapping settings (`{:brightness 20}`) to operations. |
 | `darkroom.ui.histogram-view` | Canvas that draws histogram data. |
 | `darkroom.ui.export-dialog` | Dialog for folder, file name, format, quality. |
@@ -40,3 +43,7 @@ JavaFX natives are picked automatically per OS/arch (see `project.clj`).
 - `project.clj` sets `-Djava.awt.headless=true` (avoids AWT/JavaFX conflicts on macOS) and `-Xmx2g`. These apply to `lein run`; pass them yourself when running a jar.
 - Double-click a slider to reset it.
 - **Export…** re-renders the full-resolution original with the current slider settings (not the preview) and writes it to the chosen folder. JPEG flattens transparency onto white.
+
+## RAW support
+
+`darkroom.imaging.raw/decode-linear` returns scene-linear data: interleaved 16-bit RGB, gamma 1.0, sRGB/Rec. 709 primaries, camera white balance applied, no auto-brightening. The editor currently works on sRGB-encoded 8-bit, so `loader/load-image` converts linear -> sRGB before the pipeline. Native LibRaw 0.21.2 comes from `org.bytedeco/libraw` (macOS x64/arm64, Linux x64, Windows x64; no Linux arm64 build). Native memory is outside the `-Xmx` heap cap.

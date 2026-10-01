@@ -3,6 +3,7 @@
   (:require [darkroom.imaging.core :as core]
             [darkroom.imaging.export :as export]
             [darkroom.imaging.histogram :as histogram]
+            [darkroom.imaging.loader :as loader]
             [darkroom.imaging.pipeline :as pipeline]
             [darkroom.ui.view :as view])
   (:import (java.io File))
@@ -20,7 +21,7 @@
 (defn -main [& [path]]
   (let [path    (or path default-image-path)
         file    (.getAbsoluteFile (File. ^String path))
-        source  (core/load-image file)
+        source  (loader/load-image file)
         preview (core/fit source preview-max-side)]
     (view/show!
       {:preview      preview
