@@ -1,7 +1,9 @@
 (ns darkroom.ui.view
   "JavaFX user interface. Knows nothing about how pixels are processed: it only
   hands settings to a `render-fn` and displays whatever image comes back."
-  (:import (javafx.application Platform)
+  (:import (java.util.concurrent ExecutorService Executors ThreadFactory)
+           (java.util.concurrent.atomic AtomicLong)
+           (javafx.application Platform)
            (javafx.beans.value ChangeListener)
            (javafx.geometry Insets Pos)
            (javafx.scene Scene)
@@ -18,6 +20,31 @@
                 (PixelFormat/getIntArgbInstance) ^ints pixels 0 width)
     img))
 
+;; One daemon worker keeps renders off the FX thread and in order; daemon so it
+;; never blocks JVM exit.
+(defonce ^:private ^ExecutorService worker
+  (Executors/newSingleThreadExecutor
+    (reify ThreadFactory
+      (newThread [_ r] (doto (Thread. ^Runnable r "darkroom-render") (.setDaemon true))))))
+
+(defn- latest-wins-renderer
+  "Returns (fn [settings]) that renders on the worker thread and shows the
+  result on the FX thread. If newer requests arrive while one is queued or
+  running, stale ones are dropped, so fast slider drags never pile up."
+  [view render-fn]
+  (let [ticket (AtomicLong.)]
+    (fn [settings]
+      (let [mine (.incrementAndGet ticket)
+            current? #(= mine (.get ticket))]
+        (.execute worker
+                  (fn []
+                    (when (current?)
+                      (try
+                        (let [fx-img (->fx-image (render-fn settings))]
+                          (when (current?)
+                            (Platform/runLater #(when (current?) (.setImage view fx-img)))))
+                        (catch Throwable t (.printStackTrace t))))))))))
+
 (defn- brightness-slider []
   (doto (Slider. -100 100 0)
     (.setShowTickMarks true)
@@ -33,9 +60,10 @@
         center (doto (BorderPane. view) (.setPadding (Insets. 10)))
         slider (brightness-slider)
         value  (Label. "0")
+        render! (latest-wins-renderer view render-fn)
         update! (fn [v]
                   (.setText value (str (long v)))
-                  (.setImage view (->fx-image (render-fn {:brightness (long v)}))))
+                  (render! {:brightness (long v)}))
         bar    (doto (HBox. 10.0)
                  (.setAlignment Pos/CENTER_LEFT)
                  (.setPadding (Insets. 10))
