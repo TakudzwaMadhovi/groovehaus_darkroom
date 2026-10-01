@@ -3,6 +3,7 @@
   (:require [clojure.string :as str]
             [darkroom.imaging.browser :as browser]
             [darkroom.imaging.core :as core]
+            [darkroom.imaging.denoise :as denoise]
             [darkroom.imaging.export :as export]
             [darkroom.imaging.histogram :as histogram]
             [darkroom.imaging.loader :as loader]
@@ -33,13 +34,18 @@
         preview (core/fit source preview-max-side)]
     {:file         file
      :preview      preview
-     :render-fn    #(pipeline/render preview (full-settings %))
+     :render-fn    (let [render (pipeline/renderer preview)]
+                     (fn ([settings] (render (full-settings settings)))
+                         ([settings opts] (render (full-settings settings) opts))))
      :export-fn    (fn [settings opts]
-                     (export/save! (pipeline/render source (full-settings settings)) opts))
+                     (export/save! (pipeline/render source (full-settings settings) {:quality :final})
+                                   opts))
      :default-name (str (str/replace (.getName file) #"\.[^.]*$" "") "-edited")
      :default-dir  (.getParentFile file)}))
 
 (defn -main [& [path]]
+  ;; Load OpenCV natives in the background while the window opens.
+  (doto (Thread. ^Runnable denoise/warm-up! "darkroom-warmup") (.setDaemon true) (.start))
   (view/show!
     {:session       (open-session (File. ^String (str (or path default-image-path))))
      :open-fn       open-session

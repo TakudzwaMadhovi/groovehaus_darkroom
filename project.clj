@@ -11,9 +11,11 @@
       :else                   (if arm? "linux-aarch64" "linux"))))
 
 ;; Bytedeco (JavaCPP) ships LibRaw natives per platform, selected by classifier.
-;; LibRaw has no linux-arm64 build.
+;; LibRaw has no linux-arm64 build. OpenCV (denoising) shares the same classifier.
 (def bytedeco-version "1.5.11")
 (def libraw-version (str "0.21.2-" bytedeco-version))
+(def opencv-version (str "4.10.0-" bytedeco-version))
+(def openblas-version (str "0.3.28-" bytedeco-version))
 
 (def bytedeco-platform
   (let [os   (System/getProperty "os.name" "")
@@ -34,6 +36,10 @@
                  [com.drewnoakes/metadata-extractor "2.19.0"] ; EXIF orientation
                  [org.bytedeco/javacpp ~bytedeco-version]
                  ~['org.bytedeco/javacpp bytedeco-version :classifier bytedeco-platform]
+                 [org.bytedeco/opencv ~opencv-version]
+                 ~['org.bytedeco/opencv opencv-version :classifier bytedeco-platform]
+                 ;; OpenCV's native library links against OpenBLAS.
+                 ~['org.bytedeco/openblas openblas-version :classifier bytedeco-platform]
                  [org.bytedeco/libraw ~libraw-version]
                  ~['org.bytedeco/libraw libraw-version :classifier bytedeco-platform]]
   :main darkroom.main

@@ -11,6 +11,7 @@
             [darkroom.ui.histogram-view :as histogram-view])
   (:import (java.util.concurrent ExecutorService)
            (java.util.concurrent.atomic AtomicLong)
+           (javafx.animation PauseTransition)
            (javafx.application Platform)
            (javafx.beans.value ChangeListener)
            (javafx.geometry Insets)
@@ -18,7 +19,8 @@
            (javafx.scene.control Alert Alert$AlertType Button ButtonType Label Slider)
            (javafx.scene.image ImageView)
            (javafx.scene.layout BorderPane ColumnConstraints GridPane Priority VBox)
-           (javafx.stage Stage Window)))
+           (javafx.stage Stage Window)
+           (javafx.util Duration)))
 
 ;; Workers keep heavy work off the FX thread and in order.
 (defonce ^:private ^ExecutorService worker (fx/daemon-executor "darkroom-render" 1))
@@ -26,13 +28,13 @@
 (defonce ^:private ^ExecutorService open-worker (fx/daemon-executor "darkroom-open" 1))
 
 (defn- latest-wins-renderer
-  "Returns (fn [settings]) that renders and analyzes on the worker thread and
+  "Returns (fn [settings opts]) that renders and analyzes on the worker thread and
   shows the result on the FX thread. If newer requests arrive while one is
   queued or running, stale ones are dropped, so fast slider drags never pile
   up. Results for a session that has since been replaced are dropped too."
   [^ImageView view session analyze-fn on-analysis]
   (let [ticket (AtomicLong.)]
-    (fn [settings]
+    (fn [settings opts]
       (let [mine     (.incrementAndGet ticket)
             sess     @session
             current? #(and (= mine (.get ticket)) (identical? sess @session))]
@@ -40,7 +42,7 @@
                   (fn []
                     (when (current?)
                       (try
-                        (let [img      ((:render-fn sess) settings)
+                        (let [img      ((:render-fn sess) settings opts)
                               analysis (analyze-fn img)
                               fx-img   (fx/->fx-image img)]
                           (when (current?)
@@ -111,7 +113,8 @@
 
 (def controls
   "One slider per adjustment. :key is the setting name handed to render-fn."
-  [{:key :brightness :label "Brightness" :min -100 :max 100 :value 0   :major 50 :step 5}
+  [{:key :denoise    :label "Denoise"    :min 0    :max 100 :value 0   :major 25 :step 5}
+   {:key :brightness :label "Brightness" :min -100 :max 100 :value 0   :major 50 :step 5}
    {:key :contrast   :label "Contrast"   :min -100 :max 100 :value 0   :major 50 :step 5}
    {:key :saturation :label "Saturation" :min -100 :max 100 :value 0   :major 50 :step 5}
    {:key :gamma      :label "Gamma"      :min 0.2  :max 3.0 :value 1.0 :major 0.8 :step 0.05 :decimals 2}])
@@ -168,16 +171,25 @@
         render!  (latest-wins-renderer view session analyze-fn (:update! hist))
         grid     (doto (GridPane.)
                    (.setHgap 10) (.setVgap 4) (.setPadding (Insets. 10)))
+        ;; While a slider moves, render at :draft quality (fast); once it has been
+        ;; still for 300 ms, re-render at :preview quality. Cached stages make the
+        ;; second pass cheap for every adjustment except denoise itself.
+        refine   (PauseTransition. (Duration/millis 300))
+        _        (.setOnFinished refine
+                                 (reify javafx.event.EventHandler
+                                   (handle [_ _] (render! @settings {:quality :preview}))))
         sliders  (vec (for [[row spec] (map-indexed vector controls)]
                         [(slider-row grid row spec
                                      (fn [k v]
                                        (when-not @suppress
-                                         (render! (swap! settings assoc k v)))))
+                                         (render! (swap! settings assoc k v) {:quality :draft})
+                                         (.playFromStart refine))))
                          (:value spec)]))
         load-ticket (AtomicLong.)
         browser  (atom nil)
         swap-session!
         (fn [sess]
+          (.stop refine)
           (reset! session sess)
           (reset! suppress true)
           (try
