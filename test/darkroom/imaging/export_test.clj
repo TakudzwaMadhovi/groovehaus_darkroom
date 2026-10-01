@@ -139,3 +139,42 @@
         f (export/save-scene! sc {:dir dir :name "d" :format :jpeg})]
     (is (= "d.jpg" (.getName f)))
     (is (thrown? clojure.lang.ExceptionInfo (export/save-scene! sc {:dir dir :name "e" :format :gif})))))
+
+(deftest tiff16-is-sixteen-bit-and-carries-the-profile
+  (let [dir (tmp-dir)
+        grey (scene/image 4 4 (let [a (float-array 48)] (java.util.Arrays/fill a (float 0.5)) a))
+        f (export/save-scene! grey {:dir dir :name "t" :format :tiff :space :display-p3})
+        reader (.next (ImageIO/getImageReadersByFormatName "tiff"))]
+    (is (= "t.tif" (.getName f)))
+    (with-open [in (ImageIO/createImageInputStream f)]
+      (.setInput reader in)
+      (let [raster (.getRaster (.read reader 0))
+            dir-md (javax.imageio.plugins.tiff.TIFFDirectory/createFromMetadata (.getImageMetadata reader 0))
+            icc (.getTIFFField dir-md 34675)]
+        (is (= [4 4 3] [(.getWidth raster) (.getHeight raster) (.getNumBands raster)]))
+        (is (= java.awt.image.DataBuffer/TYPE_USHORT (.getDataType (.getDataBuffer raster))))
+        (testing "50% linear grey is 0.7354 of full scale in sRGB / Display P3 encoding"
+          (is (< (Math/abs (- (.getSample raster 1 1 0) (* 65535 0.7354))) 120)))
+        (is (some? icc) "ICC profile tag present")
+        (testing "the profile is ours (Java's colour engine only restamps header fields such as the CMM and platform; tags are untouched)"
+          (let [^bytes got (.getAsBytes icc) ^bytes want (color/icc-bytes :display-p3)]
+            (is (= (alength want) (alength got)))
+            (is (java.util.Arrays/equals (java.util.Arrays/copyOfRange got 128 (alength got))
+                                         (java.util.Arrays/copyOfRange want 128 (alength want))))))))
+    (.dispose reader)))
+
+(deftest webp-roundtrip
+  (let [dir (tmp-dir)
+        red (scene/from-argb (core/image 32 32 (int-array 1024 (unchecked-int 0xFFFF0000))))
+        f (export/save-scene! red {:dir dir :name "w" :format :webp :quality 0.9})
+        bs (Files/readAllBytes (.toPath f))
+        m  (org.bytedeco.opencv.global.opencv_imgcodecs/imread (.getPath f))]
+    (is (= "w.webp" (.getName f)))
+    (is (= ["RIFF" "WEBP"] [(String. bs 0 4 "US-ASCII") (String. bs 8 4 "US-ASCII")]))
+    (is (= [32 32] [(.cols m) (.rows m)]))
+    (let [b (.createIndexer m) ; BGR
+          at (fn [c] (.get ^org.bytedeco.javacpp.indexer.UByteIndexer b 16 16 c))]
+      (is (> (at 2) 230) "red channel") (is (< (at 1) 40) "green channel"))
+    (testing "no temporary file is left behind"
+      (is (= ["w.webp"] (mapv #(.getName %) (.listFiles (java.io.File. dir))))))
+    (is (thrown? clojure.lang.ExceptionInfo (export/save-scene! red {:dir dir :name "q" :format :webp :quality 2.0})))))

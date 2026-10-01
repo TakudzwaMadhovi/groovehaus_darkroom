@@ -17,7 +17,8 @@
     :local-sel id of the selected local-adjustment layer (LOCAL tab); :local-mask shows its mask
     :tool      brush / spot settings {:brush-size :brush-feather :brush-flow :erase :spot-size :spot-mode}
     :exporting export overlay open?
-    :fmt :size :q :cspace :export-dir   export options (cspace: :srgb :display-p3 :adobe-rgb)
+    :fmt :size :q :cspace :export-dir   export options (fmt :jpeg :png :tiff :webp; cspace: :srgb :display-p3 :adobe-rgb)
+    :export-opts  {:template :sharpen :sharpen-amount :metadata :wm-text :wm-pos :scope} (see ui/export-overlay)
     :adding / :toast            transient UI
     :query     library search/sort/filter {:text :min-rating :colour :keyword :sort :dir :rejected}
     :sel       set of multi-selected frames (library); actions use `selection`
@@ -37,6 +38,8 @@
          :lf :all :tsz 220 :before false :hist-rgb false :clip-view false :pick nil :local-sel nil :local-mask false
          :tool {:brush-size 0.04 :brush-feather 0.5 :brush-flow 1.0 :erase false :spot-size 0.02 :spot-mode :heal} :exporting false :fmt :jpeg :size 2048 :q 90 :cspace :srgb
          :export-dir nil :adding false :toast nil
+         :export-opts {:template "groovehaus_{name}" :sharpen nil :sharpen-amount :standard :metadata :all
+                       :wm-text "" :wm-pos :bottom-right :scope :frame}
          :query {} :sel #{} :survey false :clipboard nil :meta-rev 0}))
 
 ;; ------------------------------------------------------------- derivations

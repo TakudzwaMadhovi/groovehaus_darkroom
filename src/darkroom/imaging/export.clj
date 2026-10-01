@@ -1,10 +1,13 @@
 (ns darkroom.imaging.export
-  "Writes images to disk as JPEG or PNG, optionally embedding an ICC profile
-  (and, for JPEG, EXIF). Pure logic, no UI dependency."
+  "Writes images to disk as JPEG, PNG, 16-bit TIFF or WebP, embedding an ICC
+  profile (JPEG, PNG, TIFF) and, for JPEG, EXIF. WebP is written by OpenCV's
+  encoder and carries no profile, so it is always sRGB. Pure logic, no UI
+  dependency."
   (:require [darkroom.imaging.color :as color]
             [darkroom.imaging.exif :as exif]
             [darkroom.imaging.scene :as scene])
-  (:import (java.awt.image BufferedImage)
+  (:import (java.awt.color ICC_ColorSpace ICC_Profile)
+           (java.awt.image BufferedImage ComponentColorModel DataBuffer Raster)
            (java.io File)
            (java.nio.file Files StandardCopyOption)
            (java.util.zip Deflater)
@@ -15,16 +18,18 @@
 (def formats
   "Supported formats. :lossy? formats take a :quality in (0, 1]."
   {:jpeg {:label "JPEG" :ext "jpg" :writer "jpeg" :lossy? true}
-   :png  {:label "PNG"  :ext "png" :writer "png"  :lossy? false}})
+   :png  {:label "PNG"  :ext "png" :writer "png"  :lossy? false}
+   :tiff {:label "TIFF 16-bit" :ext "tif" :writer "tiff" :lossy? false :scene? true}
+   :webp {:label "WebP" :ext "webp" :lossy? true :scene? true :srgb-only? true}})
 
 (def default-quality 0.9)
 
 (defn target-file
   "Resolves directory + base name + format to a File, replacing a trailing
-  .jpg/.jpeg/.png the user may have typed with the format's extension."
+  .jpg/.png/.tif/.webp the user may have typed with the format's extension."
   ^File [dir name fmt]
   (let [name (.trim (str name))
-        base (.trim (str (clojure.string/replace name #"(?i)\.(jpe?g|png)$" "")))]
+        base (.trim (str (clojure.string/replace name #"(?i)\.(jpe?g|png|tiff?|webp)$" "")))]
     (when (or (empty? base) (re-find #"[/\\]" base))
       (throw (ex-info "Invalid file name" {:name name})))
     (File. (File. (str dir)) (str base "." (:ext (formats fmt))))))
@@ -147,13 +152,89 @@
         (.dispose w)
         (Files/deleteIfExists (.toPath tmp))))))
 
+(defn- write-atomically!
+  "Calls (write! tmp-file) for a temp file beside `target`, then moves it into
+  place; a failure never leaves a half-written or clobbered file."
+  [^File target write!]
+  (let [parent (.getParentFile target)
+        _      (when-not (.isDirectory parent)
+                 (throw (ex-info "Destination folder does not exist" {:dir (str parent)})))
+        tmp    (File/createTempFile ".darkroom-" ".tmp" parent)]
+    (try
+      (write! tmp)
+      (Files/move (.toPath tmp) (.toPath target)
+                  (into-array java.nio.file.CopyOption [StandardCopyOption/REPLACE_EXISTING]))
+      target
+      (finally (Files/deleteIfExists (.toPath tmp))))))
+
+(defn- tiff16-image
+  "BufferedImage of interleaved unsigned-16-bit RGB tagged with `icc` (so the
+  TIFF writer embeds the profile)."
+  ^BufferedImage [{:keys [width height data]} ^bytes icc]
+  (let [w (int width) h (int height)
+        cs (ICC_ColorSpace. (ICC_Profile/getInstance icc))
+        cm (ComponentColorModel. cs false false java.awt.Transparency/OPAQUE DataBuffer/TYPE_USHORT)
+        raster (Raster/createInterleavedRaster DataBuffer/TYPE_USHORT w h (* 3 w) 3 (int-array [0 1 2]) nil)
+        ^shorts dst (.getData ^java.awt.image.DataBufferUShort (.getDataBuffer raster))]
+    (System/arraycopy ^shorts data 0 dst 0 (alength ^shorts data))
+    (BufferedImage. cm raster false nil)))
+
+(defn- save-tiff16! [sc space ^File target]
+  (let [enc (scene/->encoded16 sc space)
+        img (tiff16-image enc (color/icc-bytes space))
+        ^ImageWriter w (.next (ImageIO/getImageWritersByFormatName "tiff"))]
+    (try
+      (write-atomically!
+        target
+        (fn [tmp]
+          (with-open [os (ImageIO/createImageOutputStream tmp)]
+            (.setOutput w os)
+            (let [param (.getDefaultWriteParam w)]
+              (.setCompressionMode param ImageWriteParam/MODE_EXPLICIT)
+              (.setCompressionType param "Deflate")
+              (.write w nil (IIOImage. img nil nil) param)))))
+      (finally (.dispose w)))))
+
+(defn- save-webp! [sc quality ^File target]
+  (let [{:keys [width height pixels]} (scene/->argb sc :srgb)
+        ^ints px pixels
+        n (* (long width) (long height))
+        bgr (byte-array (* 3 n))]
+    (dotimes [i n]
+      (let [p (aget px i)]
+        (aset bgr (* 3 i) (unchecked-byte p))
+        (aset bgr (+ (* 3 i) 1) (unchecked-byte (unsigned-bit-shift-right p 8)))
+        (aset bgr (+ (* 3 i) 2) (unchecked-byte (unsigned-bit-shift-right p 16)))))
+    (write-atomically!
+      target
+      (fn [^File tmp]
+        ;; OpenCV picks the codec from the extension, so write to a .webp name then move
+        (let [named (File. (.getParentFile tmp) (str (.getName tmp) ".webp"))
+              mat (org.bytedeco.opencv.opencv_core.Mat. (int height) (int width) org.bytedeco.opencv.global.opencv_core/CV_8UC3
+                                                        (org.bytedeco.javacpp.BytePointer. bgr))]
+          (try
+            (when-not (org.bytedeco.opencv.global.opencv_imgcodecs/imwrite
+                        (.getPath named) mat
+                        (org.bytedeco.javacpp.IntPointer.
+                          (int-array [org.bytedeco.opencv.global.opencv_imgcodecs/IMWRITE_WEBP_QUALITY
+                                      (int (Math/round (* 100.0 (double quality))))])))
+              (throw (ex-info "WebP encoder failed" {})))
+            (Files/move (.toPath named) (.toPath tmp) (into-array java.nio.file.CopyOption [StandardCopyOption/REPLACE_EXISTING]))
+            (finally (.close mat) (Files/deleteIfExists (.toPath named)))))))))
+
 (defn save-scene!
   "Renders the float scene image `sc` into the output colour `space` (:srgb,
   :display-p3 or :adobe-rgb, default :srgb), embeds its ICC profile, and saves
-  it like `save!`. For JPEG, `:tags` (darkroom.imaging.exif/read-tags of the
-  source) become EXIF. Returns the File written."
-  [sc {:keys [space tags] :or {space :srgb} :as opts}]
-  (save! (scene/->argb sc space)
-         (assoc (dissoc opts :space :tags)
-                :icc (color/icc-bytes space)
-                :exif (exif/exif-block (or tags {}) {:srgb? (= space :srgb)}))))
+  it like `save!`. Formats: :jpeg, :png, :tiff (16-bit, deflate) and :webp (always
+  sRGB, no profile). For JPEG, `:tags` (darkroom.imaging.exif/read-tags of the
+  source, plus any :artist / :copyright to write) become EXIF; with `:tags` nil
+  no camera data is written. Returns the File written."
+  [sc {:keys [space tags format quality dir name] :or {space :srgb quality default-quality} :as opts}]
+  (case format
+    :tiff (save-tiff16! sc space (target-file dir name :tiff))
+    :webp (do (when-not (< 0.0 (double quality) 1.0000001) (throw (ex-info "Quality must be in (0, 1]" {:quality quality})))
+              (save-webp! sc quality (target-file dir name :webp)))
+    (save! (scene/->argb sc space)
+           (assoc (dissoc opts :space :tags)
+                  :icc (color/icc-bytes space)
+                  :exif (exif/exif-block (or tags {}) {:srgb? (= space :srgb)})))))

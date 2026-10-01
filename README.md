@@ -49,10 +49,17 @@ is stored as EDN in the per-user data folder
   export as a file; copy / paste settings), HISTORY (undo / redo, click a step to go back to
   it, named snapshots), INFO (the same metadata panel as the Library);
   filmstrip "THE ROLL".
-- **Export** (`⌘E`): JPEG/PNG, long edge 1080 / 2048 / full, colour space (sRGB,
-  Display P3, Adobe RGB), JPEG quality, destination folder. Renders the full-resolution
-  original; never overwrites (adds `-2`, `-3`). The output carries its ICC profile; JPEGs
-  also carry the camera's EXIF (make, model, lens, exposure, ISO, dates, copyright).
+- **Export** (`⌘E`): this frame, the selection or the whole shoot (batch, with progress);
+  JPEG, PNG, TIFF (16-bit, deflate) or WebP; long edge 1080 / 2048 / full; colour space
+  (sRGB, Display P3, Adobe RGB; WebP is always sRGB); JPEG / WebP quality; output
+  sharpening for screen, matte or glossy print (low / standard / high, applied after the
+  resize); metadata (all camera data, copyright and creator only, or none; the frame's own
+  creator / copyright notes override the camera's); optional text watermark with position;
+  file-name template (`{name}` `{n}` `{n3}` `{date}` `{rating}` `{shoot}`); destination
+  folder; presets WEB, PRINT and SOCIAL. Renders the full-resolution original; never
+  overwrites (adds `-2`, `-3`). JPEG, PNG and TIFF carry their ICC profile; EXIF is written
+  into JPEG only (not TIFF, PNG or WebP). The dialog's choices last for the session, not
+  across restarts.
 
 Shortcuts: `⌘I` import · `⌘E`/`E` export · `Esc` close / clear selection · `\` hold = before ·
 `← →` frames (wraps) · `0–5` rating (same key clears) · `X` reject · `6–9` red / yellow /
@@ -89,7 +96,8 @@ by path, modification time and size.
 | `darkroom.imaging.detail` | Texture, clarity, sharpening (luminance only), dehaze, chroma-noise reduction; Gaussian blur on a reduced copy for large radii |
 | `darkroom.imaging.pipeline` | Stages denoise → colour NR → geometry → dehaze → tone → detail, with a per-stage cache for interactive use |
 | `darkroom.imaging.raw` / `loader` / `exif` | LibRaw decode (16-bit linear, working space), single image loader, EXIF orientation/read/write |
-| `darkroom.imaging.histogram` / `export` / `browser` | Histogram, JPEG/PNG writer with ICC + EXIF, folder scan + thumbnails |
+| `darkroom.imaging.histogram` / `export` / `browser` | Histogram, JPEG / PNG / 16-bit TIFF / WebP writers (ICC, EXIF), folder scan + thumbnails |
+| `darkroom.imaging.output` | File-name templates, output sharpening, watermark, metadata modes, rendering one or many frames to disk |
 | `darkroom.catalog` | Pure library model: shoots, frames, ratings, reject flags, colour labels, keywords, notes, adjustments, undo / redo history, snapshots, user presets, virtual copies, copy / paste, search and sort; EDN persistence |
 | `darkroom.imaging.xmp` / `paths` / `thumbcache` | XMP sidecar read / write; virtual-copy paths (`file#vcN`); on-disk thumbnail cache |
 | `darkroom.ui.state` | App state atom and actions |
