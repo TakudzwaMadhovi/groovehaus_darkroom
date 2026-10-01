@@ -1,6 +1,7 @@
 (ns darkroom.imaging.exif
   "Reads EXIF metadata and writes a minimal EXIF block for exported files.
   Pure I/O, no UI dependency."
+  (:require [darkroom.imaging.paths :as paths])
   (:import (com.drew.imaging ImageMetadataReader)
            (com.drew.lang Rational)
            (com.drew.metadata Directory Metadata)
@@ -14,7 +15,7 @@
   ignores it, so callers apply it with darkroom.imaging.core/orient."
   [file]
   (try
-    (let [dir (.getFirstDirectoryOfType (ImageMetadataReader/readMetadata (File. (str file)))
+    (let [dir (.getFirstDirectoryOfType (ImageMetadataReader/readMetadata (File. (paths/source-file file)))
                                         ExifIFD0Directory)]
       (if (and dir (.containsTag dir ExifIFD0Directory/TAG_ORIENTATION))
         (let [o (.getInt dir ExifIFD0Directory/TAG_ORIENTATION)]
@@ -45,7 +46,7 @@
   yields {}."
   [file]
   (try
-    (let [^Metadata md (ImageMetadataReader/readMetadata (File. (str file)))
+    (let [^Metadata md (ImageMetadataReader/readMetadata (File. (paths/source-file file)))
           d0  (.getFirstDirectoryOfType md ExifIFD0Directory)
           sub (.getFirstDirectoryOfType md ExifSubIFDDirectory)
           get-in-dir (fn [^Directory d [k tag type]]

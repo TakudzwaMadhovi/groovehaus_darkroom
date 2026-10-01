@@ -4,6 +4,7 @@
   (:require [clojure.string :as str]
             [darkroom.imaging.core :as core]
             [darkroom.imaging.exif :as exif]
+            [darkroom.imaging.paths :as paths]
             [darkroom.imaging.raw :as raw])
   (:import (java.io File)
            (javax.imageio ImageIO)))
@@ -75,7 +76,7 @@
   RAW files use the embedded JPEG preview when it is large enough, else
   LibRaw's fast half-size decode; other formats use a subsampled read, then the EXIF orientation is applied."
   [file max-side]
-  (let [f (File. (str file))
+  (let [f (File. (paths/source-file file))
         img (if (raw/raw-file? f)
               (or (raw/embedded-thumbnail f max-side)
                   (raw/load-image f {:half-size? true :quality 0}))

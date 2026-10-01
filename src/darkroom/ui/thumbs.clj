@@ -3,6 +3,7 @@
   Thumbnails are generated on a small background pool and kept in a bounded
   in-memory LRU cache keyed by path + modification time."
   (:require [darkroom.imaging.browser :as browser]
+            [darkroom.imaging.paths :as paths]
             [darkroom.ui.fx :as fx])
   (:import (java.io File)
            (java.util LinkedHashMap Map Map$Entry)
@@ -24,7 +25,7 @@
 (defonce ^:private ^Map cache (lru 200))
 
 (defn- key-of [path]
-  (let [^File f (File. (str path))]
+  (let [^File f (File. (paths/source-file path))]
     [(.getPath f) (.lastModified f) side]))
 
 (defn cached
