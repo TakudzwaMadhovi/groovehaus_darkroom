@@ -13,16 +13,20 @@
   [width height ^ints pixels]
   {:width width :height height :pixels pixels})
 
+(defn from-buffered
+  "BufferedImage -> image map (packed ARGB)."
+  [^java.awt.image.BufferedImage buf]
+  (let [w (.getWidth buf)
+        h (.getHeight buf)]
+    (image w h (.getRGB buf 0 0 w h nil 0 w))))
+
 (defn load-image
   "Reads an image file (PNG/JPEG/GIF/BMP) from a local path into an image map."
   [path]
-  (let [f   (java.io.File. (str path))
-        ^java.awt.image.BufferedImage buf
-        (or (javax.imageio.ImageIO/read f)
-            (throw (ex-info "Unreadable or unsupported image file" {:path (str path)})))
-        w   (.getWidth buf)
-        h   (.getHeight buf)]
-    (image w h (.getRGB buf 0 0 w h nil 0 w))))
+  (let [f (java.io.File. (str path))]
+    (from-buffered
+      (or (javax.imageio.ImageIO/read f)
+          (throw (ex-info "Unreadable or unsupported image file" {:path (str path)}))))))
 
 ;; ---------------------------------------------------------------- helpers
 

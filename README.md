@@ -22,9 +22,11 @@ JavaFX natives are picked automatically per OS/arch (see `project.clj`).
 | `darkroom.imaging.export` | `save!`: write JPEG (quality 1–100) or PNG (lossless), atomically. |
 | `darkroom.imaging.raw` | LibRaw (Bytedeco) RAW decoding: `decode-linear` -> 16-bit linear RGB, `linear->display` -> sRGB 8-bit. |
 | `darkroom.imaging.loader` | `load-image`: RAW files via LibRaw, everything else via ImageIO. |
+| `darkroom.imaging.browser` | `scan` (images in a folder, natural order) and `thumbnail`. |
 | `darkroom.imaging.pipeline` | Registry mapping settings (`{:brightness 20}`) to operations. |
 | `darkroom.ui.histogram-view` | Canvas that draws histogram data. |
 | `darkroom.ui.export-dialog` | Dialog for folder, file name, format, quality. |
+| `darkroom.ui.browser-view` | Sidebar: folder picker + lazily loaded thumbnail list. |
 | `darkroom.ui.view` | JavaFX window and controls. Calls a `render-fn`; knows no image math. |
 | `darkroom.main` | Wires the two together. |
 
@@ -47,3 +49,7 @@ JavaFX natives are picked automatically per OS/arch (see `project.clj`).
 ## RAW support
 
 `darkroom.imaging.raw/decode-linear` returns scene-linear data: interleaved 16-bit RGB, gamma 1.0, sRGB/Rec. 709 primaries, camera white balance applied, no auto-brightening. The editor currently works on sRGB-encoded 8-bit, so `loader/load-image` converts linear -> sRGB before the pipeline. Native LibRaw 0.21.2 comes from `org.bytedeco/libraw` (macOS x64/arm64, Linux x64, Windows x64; no Linux arm64 build). Native memory is outside the `-Xmx` heap cap.
+
+## File browser
+
+The left sidebar lists the images in the open image's folder (**Open Folder…** switches folders; sub-folders are not scanned). Click a thumbnail, or use the Up/Down arrow keys, to open it; sliders reset for each image. Thumbnails load only for rows scrolled into view, on a background thread, and the last 400 are cached in memory. Dot-files (including macOS `._` files) are ignored. Rapid navigation drops stale loads, so only the last-selected image is opened.
