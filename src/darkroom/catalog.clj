@@ -139,6 +139,12 @@
   [catalog path n]
   (update-frame catalog path #(assoc % :rating (if (= n (:rating %)) 0 n))))
 
+(defn assign-rating
+  "Sets the rating to exactly `n` (0-5); unlike set-rating the same value does
+  not toggle, so several frames can be given one rating."
+  [catalog path n]
+  (update-frame catalog path #(assoc % :rating (max 0 (min 5 (long n))))))
+
 (defn toggle-pick
   "Star toggle: rating 5 <-> 0."
   [catalog path]
@@ -430,6 +436,24 @@
                  nil)
          cmp (if (= dir :desc) (fn [a b] (compare b a)) compare)]
      (if keyfn (vec (sort-by keyfn cmp kept)) (if (= dir :desc) (vec (reverse kept)) kept)))))
+
+;; ----------------------------------------------------------------- XMP import
+
+(defn apply-xmp-data
+  "Applies what a sidecar carried (see darkroom.imaging.xmp/parse-xmp) to a frame:
+  rating, colour label, keywords, notes and, when the sidecar holds this app's
+  settings, the edits (as the frame's starting history entry)."
+  [catalog path {:keys [rating colour keywords meta adj]}]
+  (update-frame catalog path
+                (fn [f]
+                  (cond-> f
+                    rating   (assoc :rating (max 0 (min 5 (long rating))))
+                    colour   (assoc :colour colour)
+                    (seq keywords) (assoc :keywords (vec (sort (distinct (concat (:keywords f) keywords)))))
+                    (seq meta) (update :meta merge (select-keys meta meta-fields))
+                    adj      (as-> f f
+                               (let [a (merge pipeline/default-settings adj)]
+                                 (assoc f :adj a :history [{:label "IMPORTED XMP" :adj a}] :hpos 0)))))))
 
 ;; ------------------------------------------------------------ persistence
 
