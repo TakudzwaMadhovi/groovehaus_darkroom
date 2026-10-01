@@ -30,9 +30,12 @@ is stored as EDN in the per-user data folder
   Click selects, double-click or `↵` opens Develop. Drag files/folders onto the grid
   or use `IMPORT +` to add frames to the open shoot.
 - **Develop**: canvas with AFTER/BEFORE, luma histogram, tabs
-  BASIC (exposure, contrast, highlights, shadows, temperature, tint, saturation, denoise),
-  CURVE, LOOK (B&W, fade, grain, vignette), CROP (straighten, aspect, flip),
-  PRESETS, HISTORY; filmstrip "THE ROLL".
+  BASIC (exposure, contrast, highlights, shadows, whites, blacks, temperature, tint,
+  vibrance, saturation), DETAIL (texture, clarity, dehaze, sharpening with radius and
+  edge masking, luminance and colour noise reduction), COLOR (8-band HSL mixer, split
+  toning with balance), CURVE (RGB and per-channel red/green/blue curves), LOOK (B&W,
+  fade, grain, vignette), CROP (straighten, aspect, flip), PRESETS, HISTORY;
+  filmstrip "THE ROLL".
 - **Export** (`⌘E`): JPEG/PNG, long edge 1080 / 2048 / full, colour space (sRGB,
   Display P3, Adobe RGB), JPEG quality, destination folder. Renders the full-resolution
   original; never overwrites (adds `-2`, `-3`). The output carries its ICC profile; JPEGs
@@ -51,7 +54,8 @@ Shortcuts: `⌘I` import · `⌘E`/`E` export · `Esc` close · `\` hold = befor
 | `darkroom.imaging.core` | 8-bit ARGB pixel helpers: load, `fit`, `orient`, legacy brightness/contrast/gamma ops |
 | `darkroom.imaging.develop` | Develop engine on scene images: tone pipeline (linear exposure + white balance, then perceptual-domain edits), curve LUT, geometry (crop/straighten/flip), resize |
 | `darkroom.imaging.denoise` | OpenCV non-local-means denoise on 16-bit data (offline, CPU) |
-| `darkroom.imaging.pipeline` | Stages denoise → geometry → tone, with a per-stage cache for interactive use |
+| `darkroom.imaging.detail` | Texture, clarity, sharpening (luminance only), dehaze, chroma-noise reduction; Gaussian blur on a reduced copy for large radii |
+| `darkroom.imaging.pipeline` | Stages denoise → colour NR → geometry → dehaze → tone → detail, with a per-stage cache for interactive use |
 | `darkroom.imaging.raw` / `loader` / `exif` | LibRaw decode (16-bit linear, working space), single image loader, EXIF orientation/read/write |
 | `darkroom.imaging.histogram` / `export` / `browser` | Histogram, JPEG/PNG writer with ICC + EXIF, folder scan + thumbnails |
 | `darkroom.catalog` | Pure library model: shoots, frames, ratings, adjustments, history, presets; EDN persistence |

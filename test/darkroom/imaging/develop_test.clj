@@ -1,5 +1,6 @@
 (ns darkroom.imaging.develop-test
   (:require [clojure.test :refer [deftest is testing]]
+            [darkroom.imaging.color :as color]
             [darkroom.imaging.core :as core]
             [darkroom.imaging.develop :as develop]
             [darkroom.imaging.scene :as scene]))
@@ -135,6 +136,129 @@
         p3   (aget ^ints (:pixels (scene/->argb out :display-p3)) 0)]
     (is (= 255 (ch srgb 16)) "clipped in sRGB")
     (is (< (ch p3 16) 255) "inside Display P3")))
+
+;; --- new tone controls --------------------------------------------------------
+
+(defn- rgb-of
+  "[r g b] 8-bit sRGB of the first pixel after tone with `settings`."
+  [rgb settings]
+  (let [p (aget ^ints (display (develop/tone (uniform 2 2 rgb) settings)) 0)]
+    [(ch p 16) (ch p 8) (ch p 0)]))
+
+(defn- chroma [[r g b]] (- (max r g b) (min r g b)))
+(defn- luma [[r g b]] (+ (* 0.2126 r) (* 0.7152 g) (* 0.0722 b)))
+
+(deftest whites-and-blacks
+  (testing "whites move the highlights and leave the shadows alone"
+    (is (> (first (rgb-of [230 230 230] {:whites 1.0})) 235))
+    (is (< (first (rgb-of [230 230 230] {:whites -1.0})) 225))
+    (is (<= (Math/abs (- 30 (first (rgb-of [30 30 30] {:whites 1.0})))) 2)))
+  (testing "blacks lift (+) or crush (-) the shadows and leave the highlights alone"
+    (is (> (first (rgb-of [20 20 20] {:blacks 1.0})) 40))
+    (is (< (first (rgb-of [40 40 40] {:blacks -1.0})) 25))
+    (is (<= (Math/abs (- 220 (first (rgb-of [220 220 220] {:blacks 1.0})))) 2)))
+  (testing "both are monotonic: a darker input never comes out lighter"
+    (doseq [s [{:whites 1.0 :blacks 1.0} {:whites -1.0 :blacks -1.0} {:whites 1.0 :blacks -1.0} {:whites -1.0 :blacks 1.0}]]
+      (let [outs (map #(first (rgb-of [% % %] s)) (range 0 256 5))]
+        (is (apply <= outs) (str s))))))
+
+(deftest vibrance
+  (let [muted [150 120 110] vivid [250 40 40]
+        gain  (fn [c s] (- (chroma (rgb-of c s)) (chroma (rgb-of c {}))))]
+    (testing "+vibrance lifts muted colours more than saturated ones"
+      (is (> (gain muted {:vibrance 1.0}) 8))
+      (is (> (gain muted {:vibrance 1.0}) (* 2 (max 1 (gain vivid {:vibrance 1.0}))))))
+    (testing "-vibrance reduces colour"
+      (is (< (gain muted {:vibrance -1.0}) -8)))
+    (testing "skin-tone oranges are protected relative to other muted hues"
+      (let [skin [200 150 120] blue [110 130 170]]
+        (is (< (gain skin {:vibrance 1.0}) (gain blue {:vibrance 1.0})))))
+    (testing "greys are unaffected"
+      (is (= (rgb-of [128 128 128] {}) (rgb-of [128 128 128] {:vibrance 1.0}))))))
+
+(defn- hsl-with
+  "An HSL mixer value with `[h s l]` set on the band named `band`."
+  [band hsl3]
+  (assoc develop/default-hsl (.indexOf ^java.util.List (mapv first develop/hsl-bands) band) hsl3))
+
+(deftest hsl-mixer
+  (let [red [200 60 60] green [60 200 60] blue [60 60 200]]
+    (testing "default mixer is a no-op"
+      (is (= (rgb-of red {}) (rgb-of red {:hsl develop/default-hsl}))))
+    (testing "red hue +1 shifts red toward orange (more green, same blue); green is untouched"
+      (let [[r g _] (rgb-of red {:hsl (hsl-with "RED" [1.0 0.0 0.0])})]
+        (is (> g 90)) (is (> r g)))
+      (is (= (rgb-of green {}) (rgb-of green {:hsl (hsl-with "RED" [1.0 1.0 1.0])}))))
+    (testing "red saturation -1 drains most of the red (the pixel sits between bands, so not all)"
+      (is (< (chroma (rgb-of red {:hsl (hsl-with "RED" [0.0 -1.0 0.0])})) (* 0.6 (chroma (rgb-of red {}))))))
+    (testing "all bands at -1 saturation = a full desaturation"
+      (doseq [c [red green blue [200 120 40] [150 60 170]]]
+        (is (< (chroma (rgb-of c {:hsl (vec (repeat 8 [0.0 -1.0 0.0]))})) 6) (str c))))
+    (testing "blue luminance +1 brightens blue, -1 darkens it"
+      (is (> (luma (rgb-of blue {:hsl (hsl-with "BLUE" [0.0 0.0 1.0])})) (+ 5 (luma (rgb-of blue {})))))
+      (is (< (luma (rgb-of blue {:hsl (hsl-with "BLUE" [0.0 0.0 -1.0])})) (- (luma (rgb-of blue {})) 5))))
+    (testing "greys are never touched, whatever the mixer says"
+      (let [wild (vec (repeat 8 [1.0 1.0 1.0]))]
+        (is (= (rgb-of [128 128 128] {}) (rgb-of [128 128 128] {:hsl wild})))))
+    (testing "bands blend: yellow hue +1 moves an orange pixel (between ORANGE and YELLOW) smoothly"
+      (let [orange [230 140 40]
+            a (rgb-of orange {:hsl (hsl-with "YELLOW" [1.0 0.0 0.0])})]
+        (is (not= a (rgb-of orange {})))))))
+
+(deftest hsl-lut-covers-every-hue-and-wraps
+  (let [lut (#'develop/hsl-lut (hsl-with "RED" [1.0 0.5 -0.5]))]
+    (is (= 1080 (alength lut)))
+    (is (< (Math/abs (- 30.0 (aget lut 0))) 1e-9) "full red band at hue 0")
+    (is (< (Math/abs (- 15.0 (aget lut (* 3 15)))) 1e-9) "halfway to ORANGE")
+    (is (< (Math/abs (aget lut (* 3 30))) 1e-9) "none at ORANGE")
+    (is (> (aget lut (* 3 359)) 25.0) "wraps from MAGENTA back to RED")))
+
+(deftest split-toning
+  (let [dark [40 40 40] bright [220 220 220]
+        blue-ish (fn [[r _ b]] (- b r))]
+    (testing "shadow toning tints shadows toward its hue and leaves highlights"
+      (let [s {:split-sh-hue 220.0 :split-sh-sat 1.0}]
+        (is (> (blue-ish (rgb-of dark s)) 8))
+        (is (<= (Math/abs (blue-ish (rgb-of bright s))) 2))))
+    (testing "highlight toning (orange) warms highlights and leaves shadows"
+      (let [s {:split-hl-hue 40.0 :split-hl-sat 1.0}]
+        (is (< (blue-ish (rgb-of bright s)) -8))
+        (is (<= (Math/abs (blue-ish (rgb-of dark s))) 2))))
+    (testing "toning shifts colour, not brightness (luma of the encoded working-space values)"
+      (let [s {:split-sh-hue 220.0 :split-sh-sat 1.0 :split-hl-hue 40.0 :split-hl-sat 1.0}
+            lw (color/luma-weights :working)
+            enc-luma (fn [rgb settings]
+                       (let [o (develop/tone (uniform 2 2 rgb) settings)]
+                         (reduce + (map-indexed (fn [c w] (* w (scene/srgb-encode-extended (lin o 0 c)))) lw))))]
+        (doseq [c [dark bright [128 128 128] [200 120 60]]]
+          (is (< (Math/abs (- (enc-luma c s) (enc-luma c {}))) 0.01) (str c)))))
+    (testing "balance moves the shadow/highlight split"
+      (let [mid [128 128 128]
+            s {:split-sh-hue 220.0 :split-sh-sat 1.0}]
+        (is (> (blue-ish (rgb-of mid (assoc s :split-balance 1.0)))
+               (blue-ish (rgb-of mid (assoc s :split-balance -1.0)))))))
+    (testing "saturation 0 means off, whatever the hue"
+      (is (= (rgb-of dark {}) (rgb-of dark {:split-sh-hue 10.0 :split-hl-hue 200.0}))))))
+
+(deftest per-channel-curves
+  ;; Channel curves act on the working space's own channels (as Lightroom's do on
+  ;; ProPhoto), so check the working-space data, not the sRGB view of it.
+  (let [src (grey-scene 2 2 (repeat 4 0.2159)) low [0.0 0.1 0.25 0.5 1.0]
+        chans (fn [s] (let [o (develop/tone src s)] [(lin o 0 0) (lin o 0 1) (lin o 0 2)]))
+        [r0 g0 b0] (chans {})]
+    (let [[r g b] (chans {:curve-r low})]
+      (is (< r (* 0.7 r0)) "red goes down") (is (< (Math/abs (- g g0)) 1e-3)) (is (< (Math/abs (- b b0)) 1e-3)))
+    (let [[r g b] (chans {:curve-b low})]
+      (is (< b (* 0.7 b0))) (is (< (Math/abs (- r r0)) 1e-3)) (is (< (Math/abs (- g g0)) 1e-3)))
+    (testing "the master curve applies to all channels, then the channel curve on top"
+      (let [[r g b] (chans {:curve [0 0.4 0.8 0.9 1] :curve-r low})]
+        (is (> g r)) (is (< (Math/abs (- g b)) 1e-3))))
+    (is (not (develop/tone-neutral? {:curve-g low})))))
+
+(deftest every-tone-key-is-tracked
+  (doseq [k [:whites :blacks :vibrance :hsl :split-sh-sat :split-hl-sat :split-balance :curve-r :curve-g :curve-b]]
+    (is (some #{k} develop/tone-keys) (str k))
+    (is (contains? develop/defaults k) (str k))))
 
 ;; --- curve -------------------------------------------------------------------
 

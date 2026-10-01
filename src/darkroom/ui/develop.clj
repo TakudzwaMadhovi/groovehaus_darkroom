@@ -26,10 +26,25 @@
            [:contrast "CONTRAST" -1 1 0.01 {:pct? true}]
            [:highlights "HIGHLIGHTS" -1 1 0.01 {:pct? true}]
            [:shadows "SHADOWS" -1 1 0.01 {:pct? true}]
+           [:whites "WHITES" -1 1 0.01 {:pct? true}]
+           [:blacks "BLACKS" -1 1 0.01 {:pct? true}]
            [:temp "TEMPERATURE" -1 1 0.01 {:pct? true}]
            [:tint "TINT" -1 1 0.01 {:pct? true}]
-           [:saturation "SATURATION" -1 1 0.01 {:pct? true}]
-           [:denoise "DENOISE" 0 100 1 {:decimals 0}]]
+           [:vibrance "VIBRANCE" -1 1 0.01 {:pct? true}]
+           [:saturation "SATURATION" -1 1 0.01 {:pct? true}]]
+   :detail [[:texture "TEXTURE" -1 1 0.01 {:pct? true}]
+            [:clarity "CLARITY" -1 1 0.01 {:pct? true}]
+            [:dehaze "DEHAZE" -1 1 0.01 {:pct? true}]
+            [:sharpen "SHARPEN" 0 100 1 {:decimals 0}]
+            [:sharpen-radius "RADIUS" 0.5 3 0.1 {:decimals 1}]
+            [:sharpen-masking "MASKING" 0 1 0.01 {:pct? true}]
+            [:denoise "DENOISE" 0 100 1 {:decimals 0}]
+            [:denoise-color "COLOUR NOISE" 0 100 1 {:decimals 0}]]
+   :grading [[:split-sh-hue "SHADOW HUE" 0 360 1 {:decimals 0}]
+             [:split-sh-sat "SHADOW SATURATION" 0 1 0.01 {:pct? true}]
+             [:split-hl-hue "HIGHLIGHT HUE" 0 360 1 {:decimals 0}]
+             [:split-hl-sat "HIGHLIGHT SATURATION" 0 1 0.01 {:pct? true}]
+             [:split-balance "BALANCE" -1 1 0.01 {:pct? true}]]
    :look  [[:bw "BLACK & WHITE" 0 1 0.01 {:pct? true}]
            [:fade "FADE" 0 1 0.01 {:pct? true}]
            [:grain "GRAIN" 0 1 0.01 {:pct? true}]
@@ -37,14 +52,19 @@
    :crop  [[:angle "STRAIGHTEN" -15 15 0.1 {:decimals 1}]]})
 
 (def ^:private tab-labels
-  [[:basic "BASIC"] [:curve "CURVE"] [:look "LOOK"] [:crop "CROP"] [:presets "PRESETS"] [:history "HISTORY"]])
+  [[:basic "BASIC"] [:detail "DETAIL"] [:color "COLOR"] [:curve "CURVE"] [:look "LOOK"] [:crop "CROP"]
+   [:presets "PRESETS"] [:history "HISTORY"]])
+
+(def ^:private whole-number-keys
+  "Settings whose sliders step in whole numbers and are stored as integers."
+  #{:denoise :denoise-color :sharpen :split-sh-hue :split-hl-hue})
 
 (defn- sliders-for [tab]
   (vec (for [[k label mn mx step opts] (slider-specs tab)]
          (let [default (pipeline/default-settings k)
                row (w/slider-row (merge {:label label :min mn :max mx :step step :default default
                                          :value (double default)
-                                         :on-input (fn [v] (st/set-adj! k (if (= k :denoise) (long v) v)))
+                                         :on-input (fn [v] (st/set-adj! k (if (whole-number-keys k) (long v) v)))
                                          :on-commit (fn [] (st/commit! label))
                                          :on-reset (fn [] (st/reset-adj! k label default))}
                                         opts))]
@@ -120,15 +140,60 @@
 
 (defn- curve-body []
   (let [c (curve/create)
+        channels [[:curve "RGB"] [:curve-r "RED"] [:curve-g "GREEN"] [:curve-b "BLUE"]]
+        pills (into {} (for [[k label] channels]
+                         [k (doto (w/pill label nil "sm") (w/set-base-a11y! (str label " curve")))]))
+        fp    (doto (FlowPane. 8.0 8.0))
+        show! (fn [] (doseq [[k b] pills] (w/set-on! b (= k ((:channel c))))))
         reset (w/button (theme/tracked "RESET CURVE" :normal)
-                        (fn [] (st/set-adj! :curve develop/default-curve) (st/commit! "CURVE RESET"))
+                        (fn [] (let [k ((:channel c))]
+                                 (st/set-adj! k develop/default-curve)
+                                 (st/commit! (str (.toUpperCase ^String (curve/channel-labels k)) " CURVE RESET"))))
                         "text-btn" "quiet")]
-    {:node (w/vbox 12 (:node c) reset)
-     :sync! (fn [adj] ((:sync! c) adj))}))
+    (doseq [[k b] pills]
+      (.setOnAction b (w/handler (fn [_] ((:set-channel! c) k) (show!))))
+      (.add (.getChildren fp) b))
+    (show!)
+    {:node (w/vbox 14 fp (:node c) reset)
+     :sync! (fn [adj] ((:sync! c) adj) (show!))}))
+
+(defn- color-body
+  "HSL mixer (one band at a time) and split toning."
+  []
+  (let [band     (atom 0)
+        names    (mapv first develop/hsl-bands)
+        hsl-of   (fn [adj] (vec (get adj :hsl develop/default-hsl)))
+        set-hsl! (fn [i v] (let [hsl (hsl-of (st/cur-adj @st/state))
+                                 b   @band]
+                             (st/set-adj! :hsl (assoc hsl b (assoc (nth hsl b) i v)))))
+        rows     (vec (for [[i label] [[0 "HUE"] [1 "SATURATION"] [2 "LUMINANCE"]]]
+                        (let [msg (fn [] (str (nth names @band) " " label))]
+                          (w/slider-row {:label label :min -1 :max 1 :step 0.01 :default 0.0 :value 0.0 :pct? true
+                                         :on-input  (fn [v] (set-hsl! i v))
+                                         :on-commit (fn [] (st/commit! (msg)))
+                                         :on-reset  (fn [] (set-hsl! i 0.0) (st/commit! (str (msg) " RESET")))}))))
+        pills    (vec (for [[i n] (map-indexed vector names)]
+                        (doto (w/pill n nil "sm") (w/set-base-a11y! (str n " band")))))
+        fp       (doto (FlowPane. 8.0 8.0))
+        grading  (sliders-for :grading)
+        show!    (fn [adj]
+                   (doseq [[i b] (map-indexed vector pills)] (w/set-on! b (= i @band)))
+                   (let [[h s l] (nth (hsl-of adj) @band)]
+                     (doseq [[r v] (map vector rows [h s l])] ((:set-value! r) v))))]
+    (doseq [[i b] (map-indexed vector pills)]
+      (.setOnAction b (w/handler (fn [_] (reset! band i) (show! (st/cur-adj @st/state))))))
+    (doseq [b pills] (.add (.getChildren fp) b))
+    {:node (w/vbox 18
+                   (w/tlabel "HSL" :wide "sys" "dim") fp (apply w/vbox 18 (map :node rows))
+                   (w/tlabel "SPLIT TONING" :wide "sys" "dim") (apply w/vbox 18 (map :node grading)))
+     :sync! (fn [adj]
+              (show! adj)
+              (doseq [{:keys [key set-value!]} grading] (set-value! (get adj key))))}))
 
 (defn- body-for [tab]
   (case tab
-    (:basic :look) (basic-like-body tab)
+    (:basic :detail :look) (basic-like-body tab)
+    :color   (color-body)
     :crop    (crop-body)
     :curve   (curve-body)
     :presets (presets-body)

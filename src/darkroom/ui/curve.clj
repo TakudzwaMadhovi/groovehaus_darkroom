@@ -1,6 +1,8 @@
 (ns darkroom.ui.curve
   "Tone-curve editor: 240x240 plot, 5 draggable points at x = 0, 1/4, 1/2, 3/4, 1,
   identity diagonal dashed, curve drawn through the same spline the engine uses.
+  It edits one curve at a time: the master (:curve) or a colour channel
+  (:curve-r, :curve-g, :curve-b), chosen with `set-channel!`.
 
   Keyboard: Tab focuses the plot; Left/Right choose a point; Up/Down move it by
   1% (Shift 5%, Page Up/Down 10%); Home/End jump to 0%/100%; Backspace resets the
@@ -21,10 +23,18 @@
 
 (defn- clamp01 [v] (max 0.0 (min 1.0 (double v))))
 
+(def channel-labels
+  "Setting key -> spoken/shown name of the curve it edits."
+  {:curve "RGB" :curve-r "red" :curve-g "green" :curve-b "blue"})
+
+(def ^:private curve-colors
+  {:curve nil :curve-r "#E8584F" :curve-g "#62C26A" :curve-b "#5B8DEF"})
+
 (defn create
-  "Returns {:node :sync! (fn [adj])}."
+  "Returns {:node :sync! (fn [adj]) :set-channel! (fn [key]) :channel (fn [])}."
   []
-  (let [pane   (doto (Pane.) (.setMinSize 256 256) (.setPrefSize 256 256) (.setMaxSize 256 256))
+  (let [chan   (atom :curve)                  ; setting key of the curve being edited
+        pane   (doto (Pane.) (.setMinSize 256 256) (.setPrefSize 256 256) (.setMaxSize 256 256))
         frame  (doto (Rectangle. off off size size) (.setFill nil) (.setStroke (theme/bone-a 0.18)))
         grid   (doto (Path.) (.setStroke (theme/bone-a 0.10)) (.setStrokeWidth 1.0))
         diag   (doto (Line. off (+ off size) (+ off size) off)
@@ -36,11 +46,12 @@
         halo     (doto (Circle. 9.0) (.setFill nil) (.setStroke (theme/bone-a 0.9)) (.setStrokeWidth 1.5) (.setMouseTransparent true))
         announce! (fn [cv]
                     (let [i @active]
-                      (.setAccessibleText pane (format "Tone curve point %d of 5, input %d percent, output %d percent"
-                                                       (inc i) (* 25 i) (Math/round (* 100.0 (double (nth cv i))))))))
+                      (.setAccessibleText pane (format "%s tone curve point %d of 5, input %d percent, output %d percent"
+                                                       (channel-labels @chan) (inc i) (* 25 i) (Math/round (* 100.0 (double (nth cv i))))))))
         sync!  (fn [adj]
-                 (let [cv  (get adj :curve develop/default-curve)
+                 (let [cv  (get adj @chan develop/default-curve)
                        lut (develop/curve-lut cv)]
+                   (.setStroke curve (if-let [c (curve-colors @chan)] (javafx.scene.paint.Color/web c) theme/bone))
                    (.clear (.getElements curve))
                    (dotimes [i 41]
                      (let [x (/ i 40.0)
@@ -59,9 +70,9 @@
                  (let [x (/ (- (.getX e) off) size)
                        y (- 1.0 (/ (- (.getY e) off) size))
                        i (max 0 (min 4 (Math/round (* x 4.0))))
-                       cv (vec (get (st/cur-adj @st/state) :curve develop/default-curve))]
+                       cv (vec (get (st/cur-adj @st/state) @chan develop/default-curve))]
                    (reset! active i)
-                   (st/set-adj! :curve (assoc cv i (/ (Math/round (* 100.0 (clamp01 y))) 100.0)))))]
+                   (st/set-adj! @chan (assoc cv i (/ (Math/round (* 100.0 (clamp01 y))) 100.0)))))]
     (doseq [q [0.25 0.5 0.75]]
       (.setStyle grid "")
       (doto (.getElements grid)
@@ -70,11 +81,11 @@
     (.addAll (.getStrokeDashArray diag) (java.util.Arrays/asList (into-array Double [3.0 4.0])))
     (apply w/add! pane frame grid diag curve (concat pts [halo]))
     (.setStyle pane "-fx-cursor: crosshair;")
-    (let [cur-curve #(vec (get (st/cur-adj @st/state) :curve develop/default-curve))
+    (let [cur-curve #(vec (get (st/cur-adj @st/state) @chan develop/default-curve))
           move!     (fn [delta]
                       (let [cv (cur-curve) i @active]
-                        (st/set-adj! :curve (assoc cv i (/ (Math/round (* 100.0 (clamp01 (+ (double (nth cv i)) delta)))) 100.0)))))
-          set-pt!   (fn [y] (st/set-adj! :curve (assoc (cur-curve) @active y)))]
+                        (st/set-adj! @chan (assoc cv i (/ (Math/round (* 100.0 (clamp01 (+ (double (nth cv i)) delta)))) 100.0)))))
+          set-pt!   (fn [y] (st/set-adj! @chan (assoc (cur-curve) @active y)))]
       (.setFocusTraversable pane true)
       (.put (.getProperties pane) "owns-arrows" true)
       (.setAccessibleRole pane AccessibleRole/SLIDER)
@@ -101,9 +112,12 @@
       (.setOnKeyReleased pane (w/handler (fn [^KeyEvent e]
                                            (when (#{KeyCode/UP KeyCode/DOWN KeyCode/PAGE_UP KeyCode/PAGE_DOWN KeyCode/HOME KeyCode/END KeyCode/BACK_SPACE}
                                                    (.getCode e))
-                                             (st/commit! "TONE CURVE"))))))
+                                             (st/commit! (str (.toUpperCase ^String (channel-labels @chan)) " CURVE")))))))
     (.setOnMousePressed pane (w/handler (fn [e] (.requestFocus pane) (reset! dragging true) (at e))))
     (.setOnMouseDragged pane (w/handler (fn [e] (when @dragging (at e)))))
-    (.setOnMouseReleased pane (w/handler (fn [_] (when @dragging (reset! dragging false) (st/commit! "TONE CURVE")))))
+    (.setOnMouseReleased pane (w/handler (fn [_] (when @dragging (reset! dragging false)
+                                                   (st/commit! (str (.toUpperCase ^String (channel-labels @chan)) " CURVE"))))))
     (sync! {})
-    {:node pane :sync! sync!}))
+    {:node pane :sync! sync!
+     :channel (fn [] @chan)
+     :set-channel! (fn [k] (reset! chan k) (sync! (st/cur-adj @st/state)))}))
