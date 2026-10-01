@@ -37,7 +37,7 @@
          :lf :all :tsz 220 :before false :hist-rgb false :clip-view false :pick nil :local-sel nil :local-mask false
          :tool {:brush-size 0.04 :brush-feather 0.5 :brush-flow 1.0 :erase false :spot-size 0.02 :spot-mode :heal} :exporting false :fmt :jpeg :size 2048 :q 90 :cspace :srgb
          :export-dir nil :adding false :toast nil
-         :query {} :sel #{} :clipboard nil :meta-rev 0}))
+         :query {} :sel #{} :survey false :clipboard nil :meta-rev 0}))
 
 ;; ------------------------------------------------------------- derivations
 
@@ -71,6 +71,17 @@
   "Frames shown in the library after the filters, search and sort."
   [st]
   (cat/query (:catalog st) (frames st) (query-of st) meta-of))
+
+(defn survey?
+  "True when the library shows only the selected frames, large (needs at least two)."
+  [st]
+  (and (:survey st) (> (count (:sel st)) 1)))
+
+(defn grid-frames
+  "The frames the library grid shows: the filtered frames, or in survey just the selected ones."
+  [st]
+  (let [vis (visible-frames st)]
+    (if (survey? st) (filterv (:sel st) vis) vis)))
 
 (defn selection
   "The frames actions apply to: the multi-selection in shoot order, else the
@@ -162,6 +173,16 @@
 
 (defn clear-selection! [] (swap! state assoc :sel #{}))
 
+(defn select-all!
+  "Selects every visible frame."
+  []
+  (swap! state (fn [st] (assoc st :sel (set (visible-frames st))))))
+
+(defn set-query!
+  "Sets one library search field (:text :sort :dir :colour); nil clears it."
+  [k v]
+  (swap! state update :query (fn [q] (if (nil? v) (dissoc q k) (assoc q k v)))))
+
 (defn nav!
   "Previous/next frame within the shoot, wrapping."
   [d]
@@ -171,7 +192,7 @@
               (if (empty? fs)
                 st
                 (let [k (max 0 (.indexOf ^java.util.List fs (:cur st)))]
-                  (assoc st :cur (fs (mod (+ k d) (count fs))))))))))
+                  (assoc st :cur (fs (mod (+ k d) (count fs))) :sel #{})))))))
 
 (defn move!
   "Library keyboard navigation: moves the selection `n` frames through the
@@ -185,20 +206,20 @@
                st
                (let [k (.indexOf ^java.util.List vis (:cur st))
                      k (if (neg? k) 0 (max 0 (min (dec (count vis)) (+ k n))))]
-                 (assoc st :cur (vis k))))))))
+                 (assoc st :cur (vis k) :sel #{})))))))
 
 (defn select-shoot! [id]
   (swap! state
          (fn [st]
            (let [fs (vec (:paths (cat/shoot (:catalog st) id)))]
-             (assoc st :shoot id :lf :all :cur (or (first fs) (:cur st)))))))
+             (assoc st :shoot id :lf :all :query {} :sel #{} :cur (or (first fs) (:cur st)))))))
 
 (defn create-shoot!
   "Creates a (possibly empty) shoot and makes it current. Returns its id."
   [name paths]
   (let [[c id] (cat/add-shoot (:catalog @state) name paths)]
     (when id
-      (swap! state assoc :catalog c :shoot id :adding false :lf :all
+      (swap! state assoc :catalog c :shoot id :adding false :lf :all :query {} :sel #{}
              :cur (first paths))
       (save-soon!))
     id))
@@ -265,6 +286,14 @@
 
 (defn set-meta! [k v]
   (let [ps (selection)] (when (seq ps) (update-catalog! (fn [c] (reduce #(cat/set-meta %1 %2 k v) c ps))))))
+
+(defn set-meta-if-changed!
+  "set-meta! for the selection, skipped when the current frame already has `v`
+  (focus-lost commits fire even when nothing was typed)."
+  [k v]
+  (when-let [p (:cur @state)]
+    (when (not= (clojure.string/trim (str v)) (str (get (cat/frame-meta (:catalog @state) p) k)))
+      (set-meta! k v))))
 
 (defn undo! [] (when-let [p (:cur @state)] (update-catalog! cat/undo p)))
 (defn redo! [] (when-let [p (:cur @state)] (update-catalog! cat/redo p)))
@@ -417,20 +446,29 @@
 
 ;; ------------------------------------------------------------ metadata / XMP
 
+(defonce ^:private meta-reader (atom nil)) ; :starting while a reader thread runs
+
 (defn load-meta!
   "Reads camera metadata of the current shoot's frames on a background thread
-  into `exif-cache`, bumping :meta-rev as it goes so search and sort update."
+  into `exif-cache`, bumping :meta-rev as it goes so search and sort update. One
+  reader runs at a time; it keeps going until nothing is left to read."
   []
-  (let [todo (remove #(contains? @exif-cache %) (frames))]
-    (when (seq todo)
-      (doto (Thread. ^Runnable
-                     (fn []
-                       (doseq [[i p] (map-indexed vector todo)]
-                         (swap! exif-cache assoc p (exif/read-tags p))
-                         (when (zero? (mod (inc i) 25)) (swap! state update :meta-rev inc)))
-                       (swap! state update :meta-rev inc))
-                     "darkroom-exif")
-        (.setDaemon true) (.start)))))
+  (when (and (seq (remove #(contains? @exif-cache %) (frames)))
+             (compare-and-set! meta-reader nil :starting))
+    (doto (Thread. ^Runnable
+                   (fn []
+                     (try
+                       (loop []
+                         (let [todo (remove #(contains? @exif-cache %) (frames))]
+                           (when (seq todo)
+                             (doseq [[i p] (map-indexed vector todo)]
+                               (swap! exif-cache assoc p (exif/read-tags p))
+                               (when (zero? (mod (inc i) 25)) (swap! state update :meta-rev inc)))
+                             (swap! state update :meta-rev inc)
+                             (recur))))
+                       (finally (reset! meta-reader nil))))
+                   "darkroom-exif")
+      (.setDaemon true) (.start))))
 
 (defn- xmp-data [catalog path]
   (let [f (cat/frame catalog path)]

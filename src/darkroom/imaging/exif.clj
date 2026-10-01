@@ -60,6 +60,28 @@
                        (keep #(get-in-dir sub %) exif-tags))))
     (catch Throwable _ {})))
 
+(defn- ratio [[n d]] (when (and n d (pos? d)) (/ (double n) (double d))))
+
+(defn summary
+  "Short display lines for the tags `read-tags` returned: [camera-and-lens
+  exposure capture-time], each present only when the file carries it."
+  [{:keys [make model lens-model exposure-time f-number focal-length iso datetime-original exposure-bias]}]
+  (let [cam (if (and make model (.startsWith ^String model ^String make))
+              model
+              (not-empty (clojure.string/join " " (remove clojure.string/blank? [make model]))))
+        t   (ratio exposure-time)
+        shutter (when t (if (>= t 1.0) (format "%.1f s" t) (str "1/" (Math/round (/ 1.0 t)) " s")))
+        f   (ratio f-number)
+        fl  (ratio focal-length)
+        ev  (ratio exposure-bias)
+        exposure (not-empty (clojure.string/join " · "
+                                                 (remove nil? [shutter (when f (format "f/%.1f" f)) (when fl (format "%.0f mm" fl))
+                                                               (when iso (str "ISO " iso))
+                                                               (when (and ev (not (zero? ev))) (format "%+.1f EV" ev))])))]
+    (vec (remove nil? [(not-empty (clojure.string/join " · " (remove clojure.string/blank? [cam lens-model])))
+                       exposure
+                       datetime-original]))))
+
 ;; ------------------------------------------------------------------ writing
 
 (defn- payload

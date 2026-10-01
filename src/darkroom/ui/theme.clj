@@ -46,3 +46,7 @@
   screen reader should announce (otherwise it spells labels letter by letter)."
   [s]
   (str/replace (str s) #"[\u2009\u200A]" ""))
+
+(def label-colours
+  "Colour labels as drawn in the library and info panel (see catalog/colour-labels)."
+  {:red "#D9534F" :yellow "#E9B547" :green "#5CB85C" :blue "#4A90D9" :purple "#9B6BD6"})

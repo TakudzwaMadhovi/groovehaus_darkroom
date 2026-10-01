@@ -43,3 +43,14 @@
   (let [t (exif/read-tags (write-dng! 32 32 20000))]
     (is (= "Test" (:make t)))
     (is (= "Synthetic" (:model t)))))
+
+(deftest summary-lines
+  (is (= ["Canon EOS R5 · RF 50mm F1.2" "1/250 s · f/2.8 · 50 mm · ISO 400 · -0.7 EV" "2024:05:01 10:00:00"]
+         (exif/summary {:make "Canon" :model "Canon EOS R5" :lens-model "RF 50mm F1.2"
+                        :exposure-time [1 250] :f-number [28 10] :focal-length [50 1] :iso 400
+                        :exposure-bias [-7 10] :datetime-original "2024:05:01 10:00:00"})))
+  (is (= ["NIKON D90"] (exif/summary {:make "NIKON" :model "D90"}))
+      "make is shown when the model does not repeat it")
+  (is (= ["1.5 s · ISO 100"] (exif/summary {:exposure-time [3 2] :iso 100})))
+  (is (= ["1/2 s"] (exif/summary {:exposure-time [1 2]})))
+  (is (= [] (exif/summary {}))))

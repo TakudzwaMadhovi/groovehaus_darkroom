@@ -1,6 +1,6 @@
 (ns darkroom.ui.develop
   "Develop view: canvas with before/after, histogram, tabbed adjustment panel
-  (BASIC, CURVE, LOOK, CROP, PRESETS, HISTORY) and the filmstrip."
+  (BASIC … HISTORY, INFO) and the filmstrip."
   (:require [darkroom.catalog :as cat]
             [darkroom.imaging.auto :as auto]
             [darkroom.imaging.crop :as crop]
@@ -14,12 +14,14 @@
             [darkroom.ui.curve :as curve]
             [darkroom.ui.local-overlay :as local-overlay]
             [darkroom.ui.histogram-view :as histogram-view]
+            [darkroom.ui.info :as info]
             [darkroom.ui.state :as st]
             [darkroom.ui.theme :as theme]
             [darkroom.ui.thumbs :as thumbs]
             [darkroom.ui.widgets :as w])
   (:import (javafx.geometry Insets Pos Rectangle2D)
-           (javafx.scene.control Button Label ScrollPane ScrollPane$ScrollBarPolicy)
+           (javafx.scene.control Button Label ScrollPane ScrollPane$ScrollBarPolicy TextField)
+           (javafx.stage FileChooser)
            (javafx.scene.image Image ImageView)
            (javafx.scene.layout BorderPane FlowPane HBox Pane Priority Region StackPane VBox)
            (javafx.scene.shape Rectangle)))
@@ -66,7 +68,7 @@
 
 (def ^:private tab-labels
   [[:basic "BASIC"] [:detail "DETAIL"] [:color "COLOR"] [:curve "CURVE"] [:look "LOOK"] [:crop "CROP"]
-   [:local "LOCAL"] [:spots "SPOTS"] [:presets "PRESETS"] [:history "HISTORY"]])
+   [:local "LOCAL"] [:spots "SPOTS"] [:presets "PRESETS"] [:history "HISTORY"] [:info "INFO"]])
 
 (def ^:private whole-number-keys
   "Settings whose sliders step in whole numbers and are stored as integers."
@@ -417,40 +419,133 @@
                 (doseq [{:keys [i set-value!]} rect] (set-value! (* 100.0 (nth [x y w h] i)))))
               (doseq [{:keys [key set-value!]} lens] (set-value! (get adj key))))}))
 
+(defn- row-button
+  "A full-width list row: `title` on the left, `action-text` on the right."
+  [title action-text a11y on-action & classes]
+  (let [b (doto (Button.) (.setMaxWidth Double/MAX_VALUE))
+        row (HBox.)]
+    (apply w/classes! b "gh-btn" "preset-row" classes)
+    (.setAlignment row Pos/BASELINE_LEFT)
+    (w/add! row (doto (w/label title "display") (.setStyle "-fx-font-size: 26px;")) (w/spacer) (w/tlabel action-text :wide "sys"))
+    (.setMaxWidth row Double/MAX_VALUE)
+    (.setGraphic b row)
+    (w/a11y! b a11y)
+    (.setOnAction b (w/handler (fn [_] (on-action))))
+    b))
+
+(defn- file-chooser [title] (doto (FileChooser.) (.setTitle title)
+                              (-> .getExtensionFilters (.add (javafx.stage.FileChooser$ExtensionFilter. "Presets" ["*.edn"])))))
+
 (defn- presets-body []
-  (let [col (w/vbox 0)]
-    (doseq [[n _] cat/presets]
-      (let [b (doto (Button.) (.setMaxWidth Double/MAX_VALUE))]
-        (w/classes! b "gh-btn" "preset-row")
-        (.setGraphic b (let [row (HBox.)]
-                         (.setAlignment row Pos/BASELINE_LEFT)
-                         (w/add! row (doto (w/label n "display") (.setStyle "-fx-font-size: 26px;"))
-                                 (w/spacer) (w/tlabel "APPLY" :wide "sys"))
-                         row))
-        (.setMaxWidth (.getGraphic b) Double/MAX_VALUE)
-        (w/a11y! b (str "Apply preset " n))
-        (.setOnAction b (w/handler (fn [_] (st/apply-preset! n))))
-        (w/add! col b)))
-    {:node col :sync! (fn [_] nil)}))
+  (let [mine      (w/vbox 0)
+        name-in   (doto (TextField.) (.setPromptText "name the current look"))
+        save!     (fn []
+                    (let [n (.getText name-in)]
+                      (if (st/save-preset! n)
+                        (do (.clear name-in) (st/toast! (str "SAVED " (clojure.string/upper-case (clojure.string/trim n)))))
+                        (st/toast! "NAME THE PRESET FIRST"))))
+        owner     (fn [] (some-> name-in .getScene .getWindow))
+        copy-row  (doto (FlowPane. 8.0 8.0)
+                    (w/add! (doto (w/pill "COPY SETTINGS" (fn [] (when (st/copy-settings!) (st/toast! "SETTINGS COPIED"))) "xs")
+                              (w/set-base-a11y! "Copy this frame's settings"))
+                            (doto (w/pill "PASTE" (fn [] (if-let [n (st/paste-settings!)] (st/toast! (str n " PASTED")) (st/toast! "COPY SETTINGS FIRST"))) "xs")
+                              (w/set-base-a11y! "Paste copied settings"))))
+        io-row    (doto (FlowPane. 8.0 8.0)
+                    (w/add! (doto (w/pill "IMPORT" (fn []
+                                                      (when-let [f (.showOpenDialog (file-chooser "Import presets") (owner))]
+                                                        (let [n (try (st/import-presets! f) (catch Exception _ 0))]
+                                                          (st/toast! (if (pos? n) (str n " PRESETS IMPORTED") "NO PRESETS FOUND")))))
+                                          "xs")
+                              (w/set-base-a11y! "Import presets from a file"))
+                            (doto (w/pill "EXPORT" (fn []
+                                                      (when-let [f (.showSaveDialog (file-chooser "Export presets") (owner))]
+                                                        (st/toast! (str (st/export-presets! f) " PRESETS EXPORTED"))))
+                                          "xs")
+                              (w/set-base-a11y! "Export your presets to a file"))))
+        built-in  (apply w/vbox 0 (for [[n _] cat/presets]
+                                    (row-button n "APPLY" (str "Apply preset " n) (fn [] (st/apply-preset! n)))))
+        memo      (atom nil)]
+    (w/classes! name-in "gh-input")
+    (w/a11y! name-in "Preset name")
+    (.setOnKeyPressed name-in (w/handler (fn [^javafx.scene.input.KeyEvent e]
+                                           (when (= (.getCode e) javafx.scene.input.KeyCode/ENTER) (save!) (.consume e)))))
+    {:node (w/vbox 14
+                   copy-row
+                   (w/tlabel "MY PRESETS" :wide "sys" "dim")
+                   (w/hbox 8 name-in (w/button (theme/tracked "SAVE" :normal) save! "text-btn" "sun" "short"))
+                   mine io-row
+                   (w/tlabel "BUILT-IN" :wide "sys" "dim") built-in)
+     :sync! (fn [_]
+              (let [names (mapv first (cat/user-presets (:catalog @st/state)))]
+                (when (not= names @memo)
+                  (reset! memo names)
+                  (w/keep-focus!
+                    mine
+                    (fn []
+                      (w/clear! mine)
+                      (doseq [n names]
+                        (let [del (doto (w/pill "×" (fn [] (st/delete-preset! n)) "xs") (w/set-base-a11y! (str "Delete preset " n)))
+                              row (row-button n "APPLY" (str "Apply preset " n) (fn [] (st/apply-user-preset! n)))]
+                          (w/add! mine (w/hbox 8 (doto row (HBox/setHgrow Priority/ALWAYS)) del))))
+                      (when (empty? names)
+                        (w/add! mine (doto (w/label "none yet — save the current look above." "editorial") (.setStyle "-fx-font-size: 16px;")))))))))}))
 
 (defn- history-body []
-  (let [col (w/vbox 0)]
-    {:node col
+  (let [col     (w/vbox 0)
+        snaps   (w/vbox 0)
+        name-in (doto (TextField.) (.setPromptText "name this state"))
+        snap!   (fn [] (if (st/add-snapshot! (.getText name-in)) (.clear name-in) (st/toast! "NAME THE SNAPSHOT FIRST")))
+        memo    (atom nil)
+        undo    (doto (w/pill "UNDO" (fn [] (st/undo!)) "xs") (w/set-base-a11y! "Undo (Ctrl or Command Z)"))
+        redo    (doto (w/pill "REDO" (fn [] (st/redo!)) "xs") (w/set-base-a11y! "Redo (Ctrl or Command Shift Z)"))]
+    (w/classes! name-in "gh-input")
+    (w/a11y! name-in "Snapshot name")
+    (.setOnKeyPressed name-in (w/handler (fn [^javafx.scene.input.KeyEvent e]
+                                           (when (= (.getCode e) javafx.scene.input.KeyCode/ENTER) (snap!) (.consume e)))))
+    {:node (w/vbox 14
+                   (w/hbox 8 undo redo)
+                   (w/tlabel "SNAPSHOTS" :wide "sys" "dim")
+                   (w/hbox 8 name-in (w/button (theme/tracked "SAVE" :normal) snap! "text-btn" "sun" "short"))
+                   snaps
+                   (w/tlabel "HISTORY" :wide "sys" "dim")
+                   col)
      :sync! (fn [_]
-              (let [h (:history (cat/frame (:catalog @st/state) (:cur @st/state)))
-                    n (count h)]
+              (let [s @st/state p (:cur s) c (:catalog s)
+                    h (:history (cat/frame c p)) pos (cat/history-pos c p)
+                    sn (cat/snapshots c p)]
+                (.setDisable undo (not (cat/can-undo? c p)))
+                (.setDisable redo (not (cat/can-redo? c p)))
+                (when (not= [(mapv :label h) pos (mapv :name sn)] @memo)
+                  (reset! memo [(mapv :label h) pos (mapv :name sn)])
+                (w/keep-focus!
+                  snaps
+                  (fn []
+                    (w/clear! snaps)
+                    (doseq [[i {:keys [name]}] (map-indexed vector sn)]
+                      (let [del (doto (w/pill "×" (fn [] (st/delete-snapshot! i)) "xs") (w/set-base-a11y! (str "Delete snapshot " name)))
+                            b   (w/button nil (fn [] (st/apply-snapshot! i)) "text-btn" "short")]
+                        (.setGraphic b (w/tlabel name :normal "sys-12" "sys" "bone"))
+                        (.setText b "")
+                        (w/a11y! b (str "Restore snapshot " name))
+                        (w/add! snaps (w/hbox 8 (doto b (HBox/setHgrow Priority/ALWAYS)) del))))))
                 (w/keep-focus!
                   col
                   (fn []
                     (w/clear! col)
                     (doseq [[i {:keys [label]}] (reverse (map-indexed vector h))]
-                      (let [b (w/button nil (fn [] (st/revert! i)) "text-btn" "short")
-                            cur? (= i (dec n))]
+                      (let [b    (w/button nil (fn [] (st/revert! i)) "text-btn" "short")
+                            cur? (= i pos)
+                            redo? (> i pos)]
                         (.setGraphic b (w/hbox 12 (doto (w/tlabel (format "%02d" (inc i)) :normal "sys-12" "sys" "faint") (.setMinWidth 24))
                                                (w/tlabel label :normal "sys-12" "sys" (if cur? "bone" "dim"))))
                         (.setText b "")
-                        (w/a11y! b (str "Step " (inc i) ", " label (if cur? ", current" ", revert to this step")))
-                        (w/add! col b)))))))}))
+                        (when redo? (.setOpacity b 0.5))
+                        (w/a11y! b (str "Step " (inc i) ", " label (cond cur? ", current" redo? ", undone, restore" :else ", revert to this step")))
+                        (w/add! col b))))))))}))
+
+(defn- info-body []
+  (let [panel (info/create)]
+    {:node (:node panel) :sync! (fn [_] ((:sync! panel) @st/state))}))
 
 (defn- curve-body []
   (let [c (curve/create)
@@ -514,7 +609,8 @@
     :crop    (crop-body)
     :curve   (curve-body)
     :presets (presets-body)
-    :history (history-body)))
+    :history (history-body)
+    :info    (info-body)))
 
 ;; ---------------------------------------------------------------- filmstrip
 

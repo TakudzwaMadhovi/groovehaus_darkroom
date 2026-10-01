@@ -270,3 +270,14 @@
       (is (= :blue (cat/colour c p)))
       (is (= ["sea"] (:keywords (cat/frame c p))))
       (is (== 0.9 (:exposure (cat/adj c p)))))))
+
+(deftest survey-shows-only-the-selection
+  (let [[a b c] (shoot-with "a.png" "b.png" "c.png")]
+    (swap! st/state assoc :survey true)
+    (is (not (st/survey? @st/state)) "one frame is not a survey")
+    (is (= [a b c] (st/grid-frames @st/state)))
+    (st/select! a) (st/toggle-select! c)
+    (is (st/survey? @st/state))
+    (is (= [a c] (st/grid-frames @st/state)))
+    (st/nav! 1)
+    (is (= [a b c] (st/grid-frames @st/state)) "moving drops the selection and so the survey")))

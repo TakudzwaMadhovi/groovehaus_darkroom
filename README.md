@@ -25,10 +25,16 @@ is stored as EDN in the per-user data folder
 
 ## Views
 
-- **Library**: shoots sidebar (`NEW +`), filters ALL / PICKS / EDITED, thumbnail
-  size slider, tiles with index, star (pick = 5), rating dots, EDITED flag.
-  Click selects, double-click or `↵` opens Develop. Drag files/folders onto the grid
-  or use `IMPORT +` to add frames to the open shoot.
+- **Library**: shoots sidebar (`NEW +`), filters ALL / PICKS / EDITED / REJECTED, search
+  (file name, title, caption, creator, keywords, camera), sort by import order, name
+  (natural: IMG_2 before IMG_10), rating, capture time or edited, colour-label filter,
+  thumbnail size slider, tiles with index, star (pick = 5), rating dots, colour dot, EDITED
+  and REJECTED flags. Click selects, `⌘`/`Ctrl`-click and `Shift`-click select several,
+  `⌘A` all, double-click or `↵` opens Develop. `SURVEY` (`N`) shows the selected frames
+  large side by side. The right-hand panel edits the selection: camera details (EXIF),
+  colour label, reject, title / caption / creator / copyright, keywords, and COPY / PASTE
+  settings, VIRTUAL COPY, REMOVE (from the shoot; files are never touched) and WRITE XMP.
+  Drag files/folders onto the grid or use `IMPORT +` to add frames to the open shoot.
 - **Develop**: canvas with AFTER/BEFORE, histogram (luma or RGB, with shadow/highlight
   clipping readout; `CLIP` or `J` paints clipped pixels red/blue), tabs
   BASIC (AUTO tone, AUTO WB, PICK WB eyedropper; exposure, contrast, highlights, shadows,
@@ -39,16 +45,31 @@ is stored as EDN in the per-user data folder
   90° turns, flips, perspective, lens distortion, chromatic aberration), LOCAL (masked
   adjustment layers: linear/radial gradients, brush, luminance/colour range, subject, sky;
   13 adjustments each, amount, feather, invert, limits, mask preview), SPOTS (heal or clone
-  blemishes by clicking), PRESETS, HISTORY;
+  blemishes by clicking), PRESETS (built-in and your own: save, apply, delete, import /
+  export as a file; copy / paste settings), HISTORY (undo / redo, click a step to go back to
+  it, named snapshots), INFO (the same metadata panel as the Library);
   filmstrip "THE ROLL".
 - **Export** (`⌘E`): JPEG/PNG, long edge 1080 / 2048 / full, colour space (sRGB,
   Display P3, Adobe RGB), JPEG quality, destination folder. Renders the full-resolution
   original; never overwrites (adds `-2`, `-3`). The output carries its ICC profile; JPEGs
   also carry the camera's EXIF (make, model, lens, exposure, ISO, dates, copyright).
 
-Shortcuts: `⌘I` import · `⌘E`/`E` export · `Esc` close · `\` hold = before ·
-`← →` frames (wraps) · `0–5` rating (same key clears) · `G` Library · `D` Develop ·
-`↵` open (Library). Double-click or click a slider's label to reset it.
+Shortcuts: `⌘I` import · `⌘E`/`E` export · `Esc` close / clear selection · `\` hold = before ·
+`← →` frames (wraps) · `0–5` rating (same key clears) · `X` reject · `6–9` red / yellow /
+green / blue label · `⌘Z` undo · `⌘⇧Z` or `⌘Y` redo · `⌘⇧C` / `⌘⇧V` copy / paste settings ·
+`J` clipping view · `N` survey · `G` Library · `D` Develop · `↵` open (Library).
+(`⌘` is `Ctrl` on Windows and Linux.) Double-click or click a slider's label to reset it.
+
+### Metadata and sidecars
+
+Ratings, colour labels, keywords, title / caption / creator / copyright and this app's
+edits can be written next to each original as an XMP sidecar (`photo.xmp`, `WRITE XMP`),
+using the standard `xmp:Rating`, `xmp:Label`, `dc:*` and `crs:` (Camera Raw) fields, so
+Lightroom, Camera Raw and darktable can read the rating, label and keywords; the edits are
+also kept under this app's own namespace and are restored from it on import. Importing a
+file that has a sidecar reads it. Another program's tone settings are not translated back
+into this app's sliders. Thumbnails are cached on disk (`thumbs/` in the data folder) keyed
+by path, modification time and size.
 
 ## Layout
 
@@ -69,10 +90,11 @@ Shortcuts: `⌘I` import · `⌘E`/`E` export · `Esc` close · `\` hold = befor
 | `darkroom.imaging.pipeline` | Stages denoise → colour NR → geometry → dehaze → tone → detail, with a per-stage cache for interactive use |
 | `darkroom.imaging.raw` / `loader` / `exif` | LibRaw decode (16-bit linear, working space), single image loader, EXIF orientation/read/write |
 | `darkroom.imaging.histogram` / `export` / `browser` | Histogram, JPEG/PNG writer with ICC + EXIF, folder scan + thumbnails |
-| `darkroom.catalog` | Pure library model: shoots, frames, ratings, adjustments, history, presets; EDN persistence |
+| `darkroom.catalog` | Pure library model: shoots, frames, ratings, reject flags, colour labels, keywords, notes, adjustments, undo / redo history, snapshots, user presets, virtual copies, copy / paste, search and sort; EDN persistence |
+| `darkroom.imaging.xmp` / `paths` / `thumbcache` | XMP sidecar read / write; virtual-copy paths (`file#vcN`); on-disk thumbnail cache |
 | `darkroom.ui.state` | App state atom and actions |
 | `darkroom.ui.theme` / `widgets` / `darkroom.css` | Fonts, stylesheet, tracked text, buttons, slider |
-| `darkroom.ui.header` / `library` / `develop` / `curve` / `crop-overlay` / `local-overlay` / `export-overlay` / `app` | Views and wiring |
+| `darkroom.ui.header` / `library` / `info` / `develop` / `curve` / `crop-overlay` / `local-overlay` / `export-overlay` / `app` | Views and wiring |
 | `darkroom.ui.canvas` / `thumbs` | Background loading, rendering and thumbnail caches |
 
 ## Accessibility

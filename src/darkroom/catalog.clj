@@ -171,6 +171,11 @@
     (update-frame catalog path #(assoc % :adj (merge pipeline/default-settings (:adj entry)) :hpos i))
     catalog))
 
+(defn history-pos
+  "Index of the history entry frame `path` is at."
+  [catalog path]
+  (hpos (frame catalog path)))
+
 (defn can-undo? [catalog path] (pos? (hpos (frame catalog path))))
 
 (defn can-redo? [catalog path]

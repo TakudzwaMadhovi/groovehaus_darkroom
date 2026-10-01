@@ -1,9 +1,12 @@
 (ns darkroom.ui.thumbs
   "Lazy, cached thumbnails for library tiles, shoot covers and the filmstrip.
   Thumbnails are generated on a small background pool and kept in a bounded
-  in-memory LRU cache keyed by path + modification time."
-  (:require [darkroom.imaging.browser :as browser]
+  in-memory LRU cache keyed by path + modification time, backed by an on-disk
+  JPEG cache (see darkroom.imaging.thumbcache)."
+  (:require [darkroom.catalog :as cat]
+            [darkroom.imaging.browser :as browser]
             [darkroom.imaging.paths :as paths]
+            [darkroom.imaging.thumbcache :as thumbcache]
             [darkroom.ui.fx :as fx])
   (:import (java.io File)
            (java.util LinkedHashMap Map Map$Entry)
@@ -45,7 +48,7 @@
               (fn []
                 (when (wanted?)
                   (try
-                    (let [img (or (cached path) (fx/->fx-image (browser/thumbnail path side)))]
+                    (let [img (or (cached path) (fx/->fx-image (thumbcache/thumbnail (File. (cat/app-dir) "thumbs") path side browser/thumbnail)))]
                       (.put cache (key-of path) img)
                       (Platform/runLater #(deliver! img)))
                     (catch Throwable t

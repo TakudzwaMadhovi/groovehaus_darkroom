@@ -57,6 +57,11 @@
 (defn- typing? [^Scene scene]
   (instance? TextInputControl (.getFocusOwner scene)))
 
+(defn- editing?
+  "True when a shortcut may edit photos: no text field has focus and the export dialog is closed."
+  [^Scene scene s]
+  (not (or (typing? scene) (:exporting s))))
+
 (defn- on-slider?
   "True when the focused control uses the arrow keys itself (sliders, the tone
   curve), so they must not also move between frames."
@@ -74,10 +79,19 @@
           (cond
             (and (.isShortcutDown e) (= code KeyCode/E)) (do (when (:cur s) (swap! st/state assoc :exporting true)) (.consume e))
             (and (.isShortcutDown e) (= code KeyCode/I)) (do (import!) (.consume e))
+            (and (.isShortcutDown e) (editing? scene s) (= code KeyCode/Z))
+            (do (if (.isShiftDown e) (st/redo!) (st/undo!)) (.consume e))
+            (and (.isShortcutDown e) (editing? scene s) (= code KeyCode/Y)) (do (st/redo!) (.consume e))
+            (and (.isShortcutDown e) (editing? scene s) (= code KeyCode/A) (= :library (:view s)))
+            (do (st/select-all!) (.consume e))
+            (and (.isShortcutDown e) (.isShiftDown e) (editing? scene s) (= code KeyCode/C))
+            (do (when (st/copy-settings!) (st/toast! "SETTINGS COPIED")) (.consume e))
+            (and (.isShortcutDown e) (.isShiftDown e) (editing? scene s) (= code KeyCode/V))
+            (do (if-let [n (st/paste-settings!)] (st/toast! (str n " PASTED")) (st/toast! "COPY SETTINGS FIRST")) (.consume e))
             (or (.isShortcutDown e) (.isAltDown e)) nil
             (and (= code KeyCode/BACK_SLASH) (= :develop (:view s))) (do (swap! st/state assoc :before true) (.consume e))
             (typing? scene) nil
-            (= code KeyCode/ESCAPE) (swap! st/state assoc :exporting false :pick nil)
+            (= code KeyCode/ESCAPE) (do (swap! st/state assoc :exporting false :pick nil :survey false) (st/clear-selection!))
             (:exporting s) nil
             (and (#{KeyCode/UP KeyCode/DOWN} code) (= :library (:view s)) (not (on-slider? scene)))
             (do (st/move! (* (if (= code KeyCode/DOWN) 1 -1) (long @library/grid-columns))) (.consume e))
@@ -95,6 +109,9 @@
                 (= t "g") (st/go! :library)
                 (= t "d") (st/go! :develop)
                 (= t "j") (when (= :develop (:view s)) (swap! st/state update :clip-view not))
+                (= t "x") (st/reject!)
+                (= t "n") (when (= :library (:view s)) (swap! st/state update :survey not))
+                (re-matches #"[6-9]" t) (st/label! (nth cat/colour-labels (- (Long/parseLong t) 6)))
                 (= t "e") (when (:cur s) (swap! st/state assoc :exporting true)))))))))
   (.addEventFilter
     scene KeyEvent/KEY_RELEASED
