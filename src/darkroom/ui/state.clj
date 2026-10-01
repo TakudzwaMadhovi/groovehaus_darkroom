@@ -11,6 +11,9 @@
     :lf        library filter (:all :picks :edited)
     :tsz       library thumbnail size 120-360
     :before    true while showing the unedited image
+    :hist-rgb  histogram shows R, G, B instead of luma
+    :clip-view paint clipped pixels on the canvas (red highlights, blue shadows)
+    :pick      nil or :wb while the white-balance picker waits for a click
     :exporting export overlay open?
     :fmt :size :q :cspace :export-dir   export options (cspace: :srgb :display-p3 :adobe-rgb)
     :adding / :toast            transient UI"
@@ -22,7 +25,7 @@
 
 (defonce state
   (atom {:catalog cat/empty-catalog :view :library :shoot nil :cur nil :tab :basic
-         :lf :all :tsz 220 :before false :exporting false :fmt :jpeg :size 2048 :q 90 :cspace :srgb
+         :lf :all :tsz 220 :before false :hist-rgb false :clip-view false :pick nil :exporting false :fmt :jpeg :size 2048 :q 90 :cspace :srgb
          :export-dir nil :adding false :toast nil}))
 
 ;; ------------------------------------------------------------- derivations
@@ -175,6 +178,13 @@
   "Live adjustment of the current frame (no history entry yet)."
   [k v]
   (when-let [p (:cur @state)] (swap! state update :catalog cat/set-adj p k v)))
+
+(defn set-adjs!
+  "Live adjustment of several settings of the current frame at once (one state
+  change, so one render); `m` is {setting value}."
+  [m]
+  (when-let [p (:cur @state)]
+    (swap! state update :catalog (fn [c] (reduce-kv (fn [c k v] (cat/set-adj c p k v)) c m)))))
 
 (defn commit! [label]
   (when-let [p (:cur @state)] (update-catalog! cat/commit p label)))

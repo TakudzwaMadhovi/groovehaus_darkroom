@@ -77,7 +77,7 @@
             (or (.isShortcutDown e) (.isAltDown e)) nil
             (and (= code KeyCode/BACK_SLASH) (= :develop (:view s))) (do (swap! st/state assoc :before true) (.consume e))
             (typing? scene) nil
-            (= code KeyCode/ESCAPE) (swap! st/state assoc :exporting false)
+            (= code KeyCode/ESCAPE) (swap! st/state assoc :exporting false :pick nil)
             (:exporting s) nil
             (and (#{KeyCode/UP KeyCode/DOWN} code) (= :library (:view s)) (not (on-slider? scene)))
             (do (st/move! (* (if (= code KeyCode/DOWN) 1 -1) (long @library/grid-columns))) (.consume e))
@@ -94,6 +94,7 @@
                 (re-matches #"[0-5]" t) (st/rate! (Long/parseLong t))
                 (= t "g") (st/go! :library)
                 (= t "d") (st/go! :develop)
+                (= t "j") (when (= :develop (:view s)) (swap! st/state update :clip-view not))
                 (= t "e") (when (:cur s) (swap! st/state assoc :exporting true)))))))))
   (.addEventFilter
     scene KeyEvent/KEY_RELEASED
@@ -168,7 +169,8 @@
                 (let [path (:cur s)]
                   (cond
                     (or (not= :develop (:view old)) (not= path (:cur old)) (not= (:before old) (:before s))
-                        (not= (= :crop (:tab old)) (= :crop (:tab s))))
+                        (not= (= :crop (:tab old)) (= :crop (:tab s)))
+                        (not= (boolean (:clip-view old)) (boolean (:clip-view s))))
                     ((:request! canvas) s :preview)
                     (and path (not= (cat/adj (:catalog old) path) (cat/adj (:catalog s) path)))
                     ((:request! canvas) s :draft))))))]

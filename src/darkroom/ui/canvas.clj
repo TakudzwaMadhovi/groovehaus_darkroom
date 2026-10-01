@@ -83,7 +83,7 @@
                                       (try
                                         (let [img  (scene/->argb ((:renderer sess) settings {:quality quality :scale (:scale sess)}))
                                               hist (histogram/compute img)
-                                              fxi  (fx/->fx-image img)]
+                                              fxi  (fx/->fx-image (if (:clip-view s) (histogram/clipping-overlay img) img))]
                                           (when (current?)
                                             (Platform/runLater #(when (current?)
                                                                   (.setImage view fxi)

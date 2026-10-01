@@ -83,21 +83,32 @@
   single render thread."
   [source]
   (let [cache (atom [])]
-    (fn render-cached
-      ([settings] (render-cached settings nil))
-      ([settings opts]
-       (let [s    (full settings)
-             prev @cache
-             [img entries]
-             (reduce (fn [[img acc valid?] [i {:keys [keys neutral? quality? scaled?] :as stage}]]
-                       (let [k  (cond-> (select-keys s keys) scaled? (assoc ::scale (:scale opts)))
-                             q  (if (and quality? (not (neutral? s))) (rank opts) 0)
-                             [pk pimg pq] (get prev i)]
-                         (if (and valid? pimg (= k pk) (>= (long pq) q))
-                           [pimg (conj acc [k pimg pq]) true]
-                           (let [out (run-stage img stage s opts)]
-                             [out (conj acc [k out q]) false]))))
-                     [source [] true]
-                     (map-indexed vector stages))]
-         (reset! cache entries)
-         img)))))
+    (with-meta
+      (fn render-cached
+        ([settings] (render-cached settings nil))
+        ([settings opts]
+         (let [s    (full settings)
+               prev @cache
+               [img entries]
+               (reduce (fn [[img acc valid?] [i {:keys [keys neutral? quality? scaled?] :as stage}]]
+                         (let [k  (cond-> (select-keys s keys) scaled? (assoc ::scale (:scale opts)))
+                               q  (if (and quality? (not (neutral? s))) (rank opts) 0)
+                               [pk pimg pq] (get prev i)]
+                           (if (and valid? pimg (= k pk) (>= (long pq) q))
+                             [pimg (conj acc [k pimg pq]) true]
+                             (let [out (run-stage img stage s opts)]
+                               [out (conj acc [k out q]) false]))))
+                       [source [] true]
+                       (map-indexed vector stages))]
+           (reset! cache entries)
+           img)))
+      {::cache cache})))
+
+(defn cached-image
+  "The image stage `id` (:geometry, :tone, ...) produced in the last render of
+  `renderer`, or nil before the first render. For a stage that was skipped it is
+  the image that passed through it."
+  [renderer id]
+  (when-let [cache (::cache (meta renderer))]
+    (when-let [i (first (keep-indexed (fn [i st] (when (= id (:id st)) i)) stages))]
+      (second (get @cache i)))))

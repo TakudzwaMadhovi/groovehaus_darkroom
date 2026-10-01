@@ -29,9 +29,10 @@ is stored as EDN in the per-user data folder
   size slider, tiles with index, star (pick = 5), rating dots, EDITED flag.
   Click selects, double-click or `↵` opens Develop. Drag files/folders onto the grid
   or use `IMPORT +` to add frames to the open shoot.
-- **Develop**: canvas with AFTER/BEFORE, luma histogram, tabs
-  BASIC (exposure, contrast, highlights, shadows, whites, blacks, temperature, tint,
-  vibrance, saturation), DETAIL (texture, clarity, dehaze, sharpening with radius and
+- **Develop**: canvas with AFTER/BEFORE, histogram (luma or RGB, with shadow/highlight
+  clipping readout; `CLIP` or `J` paints clipped pixels red/blue), tabs
+  BASIC (AUTO tone, AUTO WB, PICK WB eyedropper; exposure, contrast, highlights, shadows,
+  whites, blacks, temperature, tint, vibrance, saturation), DETAIL (texture, clarity, dehaze, sharpening with radius and
   edge masking, luminance and colour noise reduction), COLOR (8-band HSL mixer, split
   toning with balance), CURVE (RGB and per-channel red/green/blue curves), LOOK (B&W,
   fade, grain, vignette), CROP (interactive crop rectangle with aspect lock, straighten,
@@ -53,6 +54,7 @@ Shortcuts: `⌘I` import · `⌘E`/`E` export · `Esc` close · `\` hold = befor
 | `darkroom.imaging.color` | Colour science: RGB spaces, 3x3 matrices, transfer curves, Bradford adaptation, white-balance (temperature/tint) matrix, ICC profile generation |
 | `darkroom.imaging.scene` | Float scene-linear images in the working space; conversion from 8-bit sRGB / LibRaw 16-bit and to 8/16-bit output spaces; LUT helpers; linear-light box downscale |
 | `darkroom.imaging.geometry` | Crop, straighten, quarter turns, flips, perspective, lens distortion, CA correction in one resampling pass with an exact fill-zoom; resize |
+| `darkroom.imaging.auto` | Auto tone (exposure/contrast/highlights/shadows/whites/blacks), auto white balance, white balance from a picked colour (Newton solve on the temperature/tint matrix) |
 | `darkroom.imaging.crop` | The crop rectangle's drag maths (move, resize, draw, aspect lock, hit testing) |
 | `darkroom.imaging.core` | 8-bit ARGB pixel helpers: load, `fit`, `orient`, legacy brightness/contrast/gamma ops |
 | `darkroom.imaging.develop` | Tone engine on scene images: linear exposure + white balance, then perceptual-domain edits (whites/blacks, shadows/highlights, contrast, curves, HSL, vibrance, split toning, B&W, vignette, grain) |

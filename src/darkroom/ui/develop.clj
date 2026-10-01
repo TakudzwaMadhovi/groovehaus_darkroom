@@ -2,7 +2,9 @@
   "Develop view: canvas with before/after, histogram, tabbed adjustment panel
   (BASIC, CURVE, LOOK, CROP, PRESETS, HISTORY) and the filmstrip."
   (:require [darkroom.catalog :as cat]
+            [darkroom.imaging.auto :as auto]
             [darkroom.imaging.crop :as crop]
+            [darkroom.imaging.histogram :as histogram]
             [darkroom.imaging.develop :as develop]
             [darkroom.imaging.geometry :as geometry]
             [darkroom.imaging.pipeline :as pipeline]
@@ -87,6 +89,44 @@
         (.add (.getChildren fp) b)))
     fp))
 
+(defn- with-preview!
+  "Calls (f preview-scene adjustments) for the current frame, or says it is
+  still loading."
+  [f]
+  (let [s @st/state sess (canvas/session (:cur s))]
+    (if sess (f (:preview sess) (st/cur-adj s)) (st/toast! "STILL LOADING"))))
+
+(defn- auto-tone! []
+  (with-preview!
+    (fn [preview adj]
+      (st/set-adjs! (auto/auto-tone preview (select-keys adj [:temp :tint])))
+      (st/commit! "AUTO TONE"))))
+
+(defn- auto-wb! []
+  (with-preview!
+    (fn [preview _]
+      (st/set-adjs! (auto/auto-wb preview))
+      (st/commit! "AUTO WHITE BALANCE"))))
+
+(defn- toggle-pick! []
+  (let [on? (not= :wb (:pick @st/state))]
+    (swap! st/state assoc :pick (when on? :wb))
+    (when on? (st/toast! "CLICK A NEUTRAL GREY OR WHITE"))))
+
+(defn- pick-wb!
+  "Sets temperature and tint from the colour under a click on the canvas image
+  `iv`, read from the cropped/turned source before any tone edit."
+  [^javafx.scene.input.MouseEvent e ^ImageView iv]
+  (let [s @st/state sess (canvas/session (:cur s))]
+    (when-let [img (and sess (pipeline/cached-image (:renderer sess) :geometry))]
+      (let [b  (.getBoundsInLocal iv)
+            w  (long (:width img)) h (long (:height img))
+            px (min (dec w) (max 0 (long (* w (/ (.getX e) (max 1.0 (.getWidth b)))))))
+            py (min (dec h) (max 0 (long (* h (/ (.getY e) (max 1.0 (.getHeight b)))))))]
+        (st/set-adjs! (auto/wb-from-color (auto/average-color img px py 5)))
+        (st/commit! "WHITE BALANCE PICK")
+        (swap! st/state assoc :pick nil)))))
+
 (defn- basic-like-body [tab]
   (let [rows (sliders-for tab)]
     {:node (apply w/vbox 18 (map :node rows))
@@ -140,6 +180,19 @@
                                  :on-commit (fn [] (st/commit! (str "CROP " label)))
                                  :on-reset  (fn [] (set-part! i (if (>= i 2) 100.0 0.0)) (st/commit! (str "CROP " label " RESET")))})
                   :i i)))))
+
+(defn- basic-body
+  "BASIC: the AUTO / AUTO WB / PICK WB row above the sliders."
+  []
+  (let [base (basic-like-body :basic)
+        auto-btn (doto (w/pill "AUTO" auto-tone! "sm") (w/set-base-a11y! "Auto tone"))
+        wb-btn   (doto (w/pill "AUTO WB" auto-wb! "sm") (w/set-base-a11y! "Auto white balance"))
+        pick-btn (doto (w/pill "PICK WB" toggle-pick! "sm") (w/set-base-a11y! "Pick white balance from the photo"))
+        row      (doto (FlowPane. 8.0 8.0) (.. getChildren (addAll (java.util.Arrays/asList (into-array javafx.scene.Node [auto-btn wb-btn pick-btn])))))]
+    {:node (w/vbox 18 row (:node base))
+     :sync! (fn [adj]
+              ((:sync! base) adj)
+              (w/set-on! pick-btn (= :wb (:pick @st/state))))}))
 
 (defn- crop-body []
   (let [angle  (first (sliders-for :crop))
@@ -265,7 +318,8 @@
 
 (defn- body-for [tab]
   (case tab
-    (:basic :detail :look) (basic-like-body tab)
+    :basic   (basic-body)
+    (:detail :look) (basic-like-body tab)
     :color   (color-body)
     :crop    (crop-body)
     :curve   (curve-body)
@@ -312,6 +366,9 @@
         rating   (w/label "" "sys-13" "sys" "muted")
         before   (w/pill "AFTER" (fn [] (swap! st/state update :before not)))
         hist     (histogram-view/create)
+        clip-lbl (w/tlabel "" :normal "sys-10" "faint")
+        rgb-btn  (doto (w/pill "RGB" (fn [] (swap! st/state update :hist-rgb not)) "sm") (w/set-base-a11y! "Show red, green and blue in the histogram"))
+        clip-btn (doto (w/pill "CLIP" (fn [] (swap! st/state update :clip-view not)) "sm") (w/set-base-a11y! "Show clipped pixels on the photo (J)"))
         overlay  (crop-overlay/create iv)
         tabs     (doto (FlowPane. 14.0 0.0) (.setPadding (Insets. 0 24 0 24)))
         tab-btns (vec (for [[k l] tab-labels]
@@ -326,6 +383,7 @@
         roll-count (w/tlabel "" :normal "sys-11s" "faint")
         body     (atom nil)
         memo     (atom {})]
+    (.setOnMouseClicked iv (w/handler (fn [e] (when (= :wb (:pick @st/state)) (pick-wb! e iv)))))
     (.bind (.fitWidthProperty iv) (.subtract (.widthProperty canvas) 40))
     (.bind (.fitHeightProperty iv) (.subtract (.heightProperty canvas) 40))
     (w/classes! canvas "ground")
@@ -351,7 +409,8 @@
         (.setMinWidth left-col 0)
         (VBox/setVgrow body-scroll Priority/ALWAYS)
         (w/add! panel
-                (doto (w/vbox 8 (w/tlabel "HISTOGRAM" :wide "sys" "faint") (:node hist))
+                (doto (w/vbox 8 (w/hbox 8 (w/tlabel "HISTOGRAM" :wide "sys" "faint") (w/spacer) rgb-btn clip-btn)
+                              (:node hist) clip-lbl)
                   (.setPadding (Insets. 18 24 10 24)))
                 tabs body-scroll)
         (let [strip (doto (w/vbox 10
@@ -373,7 +432,12 @@
             {:node outer
              :panel panel
              :view iv
-             :update-histogram! (:update! hist)
+             :update-histogram!
+             (fn [h]
+               ((:update! hist) h)
+               (let [[lo hi] (histogram/clip-percentages h)]
+                 (.setText clip-lbl (theme/tracked (format "SHADOWS %.1f%% · HIGHLIGHTS %.1f%%" lo hi) :normal))
+                 (w/a11y! clip-lbl (format "Clipped: %.1f percent of pixels in the shadows, %.1f percent in the highlights" lo hi))))
              :set-loading! (fn [on?] (.setVisible loading (boolean on?)))
              :refresh!
              (fn refresh! [s]
@@ -400,6 +464,10 @@
                    (.add (.getChildren body-box) (:node @body)))
                  (when (and @body adj) ((:sync! @body) adj))
                  ((:refresh! overlay) s)
+                 ((:set-mode! hist) (if (:hist-rgb s) :rgb :luma))
+                 (w/set-on! rgb-btn (boolean (:hist-rgb s)))
+                 (w/set-on! clip-btn (boolean (:clip-view s)))
+                 (.setCursor iv (if (:pick s) javafx.scene.Cursor/CROSSHAIR javafx.scene.Cursor/DEFAULT))
                  ;; filmstrip
                  (let [sig [fs path (mapv #(cat/edited? c %) fs)]]
                    (when (not= sig (:strip @memo))
