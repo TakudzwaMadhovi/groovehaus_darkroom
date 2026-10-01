@@ -20,7 +20,9 @@
   {:jpeg {:label "JPEG" :ext "jpg" :writer "jpeg" :lossy? true}
    :png  {:label "PNG"  :ext "png" :writer "png"  :lossy? false}
    :tiff {:label "TIFF 16-bit" :ext "tif" :writer "tiff" :lossy? false :scene? true}
-   :webp {:label "WebP" :ext "webp" :lossy? true :scene? true :srgb-only? true}})
+   :webp {:label "WebP" :ext "webp" :lossy? true :scene? true :srgb-only? true}
+   ;; scene-referred: linear working-space floats, values above 1 kept (HDR merges, panoramas)
+   :tiff32 {:label "TIFF 32-bit float" :ext "tif" :writer "tiff" :lossy? false :scene? true}})
 
 (def default-quality 0.9)
 
@@ -195,6 +197,34 @@
               (.write w nil (IIOImage. img nil nil) param)))))
       (finally (.dispose w)))))
 
+(defn- float-image
+  "BufferedImage of interleaved 32-bit float RGB (the scene image's own data)
+  tagged with `icc`."
+  ^BufferedImage [{:keys [width height ^floats data]} ^bytes icc]
+  (let [w (int width) h (int height)
+        cs (ICC_ColorSpace. (ICC_Profile/getInstance icc))
+        cm (ComponentColorModel. cs false false java.awt.Transparency/OPAQUE DataBuffer/TYPE_FLOAT)
+        sm (java.awt.image.PixelInterleavedSampleModel. DataBuffer/TYPE_FLOAT w h 3 (* 3 w) (int-array [0 1 2]))
+        raster (java.awt.image.Raster/createWritableRaster sm nil)
+        ^floats dst (.getData ^java.awt.image.DataBufferFloat (.getDataBuffer raster))]
+    (System/arraycopy data 0 dst 0 (alength data))
+    (BufferedImage. cm raster false nil)))
+
+(defn- save-tiff32! [sc ^File target]
+  (let [img (float-image sc (color/icc-bytes :working-linear))
+        ^ImageWriter w (.next (ImageIO/getImageWritersByFormatName "tiff"))]
+    (try
+      (write-atomically!
+        target
+        (fn [tmp]
+          (with-open [os (ImageIO/createImageOutputStream tmp)]
+            (.setOutput w os)
+            (let [param (.getDefaultWriteParam w)]
+              (.setCompressionMode param ImageWriteParam/MODE_EXPLICIT)
+              (.setCompressionType param "Deflate")
+              (.write w nil (IIOImage. img nil nil) param)))))
+      (finally (.dispose w)))))
+
 (defn- save-webp! [sc quality ^File target]
   (let [{:keys [width height pixels]} (scene/->argb sc :srgb)
         ^ints px pixels
@@ -232,6 +262,7 @@
   [sc {:keys [space tags format quality dir name] :or {space :srgb quality default-quality} :as opts}]
   (case format
     :tiff (save-tiff16! sc space (target-file dir name :tiff))
+    :tiff32 (save-tiff32! sc (target-file dir name :tiff32))
     :webp (do (when-not (< 0.0 (double quality) 1.0000001) (throw (ex-info "Quality must be in (0, 1]" {:quality quality})))
               (save-webp! sc quality (target-file dir name :webp)))
     (save! (scene/->argb sc space)

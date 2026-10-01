@@ -4,6 +4,7 @@
             [darkroom.imaging.core :as core]
             [darkroom.imaging.exif :as exif]
             [darkroom.imaging.export :as export]
+            [darkroom.imaging.loader]
             [darkroom.imaging.scene :as scene])
   (:import (java.awt.color ICC_Profile)
            (java.nio.file Files)
@@ -178,3 +179,44 @@
     (testing "no temporary file is left behind"
       (is (= ["w.webp"] (mapv #(.getName %) (.listFiles (java.io.File. dir))))))
     (is (thrown? clojure.lang.ExceptionInfo (export/save-scene! red {:dir dir :name "q" :format :webp :quality 2.0})))))
+
+(deftest float-tiff-keeps-everything-and-round-trips-through-the-loader
+  (let [dir (tmp-dir)
+        w 5 h 4
+        a (float-array (* 3 w h))
+        _ (dotimes [i (* w h)] (aset a (* 3 i) (float (* 0.5 i))) (aset a (+ (* 3 i) 1) (float 0.25)) (aset a (+ (* 3 i) 2) (float (- (* 0.1 i) 0.5))))
+        sc (scene/image w h a)
+        f (export/save-scene! sc {:dir dir :name "hdr" :format :tiff32})
+        back (darkroom.imaging.loader/load-scene (.getPath f))]
+    (is (= "hdr.tif" (.getName f)))
+    (is (= [w h] [(:width back) (:height back)]))
+    (testing "bit-exact floats: values above 1 and below 0 survive"
+      (is (java.util.Arrays/equals ^floats a ^floats (:data back))))
+    (testing "the file carries the linear working profile"
+      (let [r (.next (ImageIO/getImageReadersByFormatName "tiff"))]
+        (with-open [in (ImageIO/createImageInputStream f)]
+          (.setInput r in)
+          (let [cs (.getColorSpace (.getColorModel (.read r 0)))]
+            (is (instance? java.awt.color.ICC_ColorSpace cs))))
+        (.dispose r)))
+    (testing "a preview of an over-range file is not clipped to white"
+      (let [d (darkroom.imaging.loader/load-image (.getPath f))
+            p (aget ^ints (:pixels d) 9)]
+        (is (< (bit-and (unsigned-bit-shift-right p 16) 0xFF) 255))))
+    (testing "ordinary TIFFs are not mistaken for scene files"
+      (let [t (export/save-scene! sc {:dir dir :name "plain" :format :tiff})]
+        (is (nil? (darkroom.imaging.loader/float-tiff-scene (.getPath t))))))
+    (testing "a float TIFF from other software (linear sRGB, no profile of ours) is converted to the working space"
+      ;; written as plain float sRGB-tagged data
+      (let [cs (java.awt.color.ColorSpace/getInstance java.awt.color.ColorSpace/CS_LINEAR_RGB)
+            cm (java.awt.image.ComponentColorModel. cs false false java.awt.Transparency/OPAQUE java.awt.image.DataBuffer/TYPE_FLOAT)
+            sm (java.awt.image.PixelInterleavedSampleModel. java.awt.image.DataBuffer/TYPE_FLOAT 2 2 3 6 (int-array [0 1 2]))
+            raster (java.awt.image.Raster/createWritableRaster sm nil)
+            _ (.setPixels raster 0 0 2 2 (float-array (mapcat identity (repeat 4 [1.0 0.0 0.0]))))
+            img (java.awt.image.BufferedImage. cm raster false nil)
+            ext (java.io.File. ^String dir "ext.tif")]
+        (ImageIO/write img "tiff" ext)
+        (let [sc2 (darkroom.imaging.loader/float-tiff-scene (.getPath ext))
+              want (color/mat-vec (color/convert-matrix :srgb :working) [1 0 0])]
+          (is (some? sc2))
+          (is (every? true? (map #(< (Math/abs (- (double %1) (double %2))) 1e-3) want (take 3 (:data sc2))))))))))

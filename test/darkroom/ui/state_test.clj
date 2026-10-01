@@ -6,6 +6,8 @@
             [darkroom.imaging.exif]
             [darkroom.imaging.export]
             [darkroom.imaging.lens]
+            [darkroom.imaging.panorama-test]
+            [darkroom.imaging.scene]
             [darkroom.ui.state :as st])
   (:import (java.io File)
            (java.nio.file Files)
@@ -390,3 +392,51 @@
           (st/add-layer! :subject-ai)
           (is (= [:subject-ai] (mapv :type (st/layers))))
           (is (= model (get-in (first (st/layers)) [:shape :model])))))))
+
+(defn- await-frames [n ms]
+  (let [end (+ (System/currentTimeMillis) ms)]
+    (loop [] (cond (>= (count (st/frames)) n) true (> (System/currentTimeMillis) end) false :else (do (Thread/sleep 100) (recur))))))
+
+(deftest hdr-merge-and-panorama-import-their-result
+  (let [d (tmp-dir)
+        wd (#'darkroom.imaging.panorama-test/world 240 160 3)
+        save (fn [name sc tags] (.getPath (darkroom.imaging.export/save!
+                                            (darkroom.imaging.scene/->argb sc :srgb)
+                                            {:dir (.getPath d) :name name :format :jpeg :quality 0.98
+                                             :exif (when tags (darkroom.imaging.exif/exif-block tags {}))})))
+        scale (fn [{:keys [width height data]} k] (let [out (float-array (alength ^floats data))]
+                                                    (dotimes [i (alength ^floats data)] (aset out i (float (min 1.0 (* k (aget ^floats data i))))))
+                                                    (darkroom.imaging.scene/image width height out)))
+        a (save "b1" (scale wd 0.5) {:exposure-time [1 400] :f-number [8 1] :iso 100})
+        b (save "b2" (scale wd 1.0) {:exposure-time [1 200] :f-number [8 1] :iso 100})
+        c (save "b3" (scale wd 2.0) {:exposure-time [1 100] :f-number [8 1] :iso 100})]
+    (st/create-shoot! "BRACKET" [a b c])
+    (testing "one frame selected: nothing happens"
+      (st/merge-hdr!)
+      (Thread/sleep 300)
+      (is (= 3 (count (st/frames)))))
+    (st/select! a) (st/toggle-select! b) (st/toggle-select! c)
+    (st/merge-hdr!)
+    (is (await-frames 4 60000) "the merged frame joins the shoot")
+    (let [new (last (st/frames))]
+      (is (re-find #"b1-HDR\.tif$" new))
+      (is (= new (:cur @st/state)) "and is selected")
+      (is (.isFile (java.io.File. ^String new))))))
+
+(deftest panorama-import-gets-a-crop
+  (let [d (tmp-dir)
+        wd (#'darkroom.imaging.panorama-test/world 580 240 11)
+        save (fn [name x0] (.getPath (darkroom.imaging.export/save!
+                                       (darkroom.imaging.scene/->argb (#'darkroom.imaging.panorama-test/window wd x0 0 360 240 1.0) :srgb)
+                                       {:dir (.getPath d) :name name :format :jpeg :quality 0.98})))
+        a (save "p1" 0) b (save "p2" 220)]
+    (st/create-shoot! "PANO" [a b])
+    (st/select! a) (st/toggle-select! b)
+    (st/stitch-panorama!)
+    (is (await-frames 3 90000))
+    (let [new (last (st/frames))]
+      (is (re-find #"p1-Pano\.tif$" new))
+      (let [crop (:crop (cat/adj (:catalog @st/state) new))]
+        (is (= 4 (count crop)))
+        (is (every? #(<= 0.0 % 1.0) crop))
+        (is (> (nth crop 2) 0.9) "the crop keeps nearly the whole canvas")))))

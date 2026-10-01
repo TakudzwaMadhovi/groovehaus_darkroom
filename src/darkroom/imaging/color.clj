@@ -69,7 +69,14 @@
                 :from-srgb [0.529317 0.330092 0.140588
                             0.098368 0.873465 0.028169
                             0.016879 0.117663 0.865457]
-                :white d65-xy :trc :srgb}})
+                :white d65-xy :trc :srgb}
+   ;; the same primaries with linear light, for scene-referred files (32-bit float
+   ;; TIFFs of merged HDR frames and panoramas, see darkroom.imaging.export)
+   :working-linear {:label "Working (linear)"
+                    :from-srgb [0.529317 0.330092 0.140588
+                                0.098368 0.873465 0.028169
+                                0.016879 0.117663 0.865457]
+                    :white d65-xy :trc [:gamma 1.0]}})
 
 (defn rgb->xyz-matrix
   "Matrix taking linear RGB of `space` to XYZ (white = Y 1)."

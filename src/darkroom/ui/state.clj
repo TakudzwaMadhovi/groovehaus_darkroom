@@ -30,10 +30,12 @@
             [darkroom.catalog :as cat]
             [darkroom.imaging.browser :as browser]
             [darkroom.imaging.camera :as camera]
+            [darkroom.imaging.combine :as combine]
             [darkroom.imaging.exif :as exif]
             [darkroom.imaging.lens :as lens]
             [darkroom.imaging.local :as local]
             [darkroom.imaging.mask :as mask]
+            [darkroom.imaging.paths :as paths]
             [darkroom.imaging.watch :as watch]
             [darkroom.imaging.xmp :as xmp])
   (:import (java.io File)
@@ -621,6 +623,53 @@
     (set-adj! :lens-profile nil)
     (commit! "LENS PROFILE OFF")))
 
+;; ------------------------------------------------------ HDR merge / panorama
+
+(defonce ^:private ^java.util.concurrent.ExecutorService combine-worker
+  (Executors/newSingleThreadExecutor
+    (reify ThreadFactory (newThread [_ r] (doto (Thread. ^Runnable r "darkroom-combine") (.setDaemon true))))))
+
+(defn- run-combine!
+  "Runs `(job paths progress)` on the merge thread for the selected frames (at
+  least two), then imports the file it returns and selects it. `done` is called
+  on the FX thread with the job's result."
+  [what job done]
+  (let [ps (vec (remove paths/virtual-copy? (selection)))]
+    (if (< (count ps) 2)
+      (toast! (str "SELECT AT LEAST TWO FRAMES TO " what))
+      (do (toast! (str what " " (count ps) " FRAMES…"))
+          (.execute combine-worker
+                    (fn []
+                      (try
+                        (let [r (job ps (fn [i n] (run-ui! #(toast! (str what " " i "/" n)))))]
+                          (run-ui! (fn []
+                                     (import-paths! [(.getPath ^File (:file r))])
+                                     (done r))))
+                        (catch Throwable t
+                          (run-ui! #(toast! (str what " FAILED — " (str/upper-case (str (or (.getMessage t) (.getSimpleName (class t))))))))))))))))
+
+(defn merge-hdr!
+  "HDR-merges the selected frames (an exposure bracket) into a new float TIFF
+  next to the first one, and imports it."
+  []
+  (run-combine! "HDR MERGE"
+                (fn [ps progress] (combine/hdr ps {:progress progress}))
+                (fn [{:keys [source]}]
+                  (toast! (str "HDR MERGED · EXPOSURES FROM " (if (= source :exif) "CAMERA SETTINGS" "THE PICTURES"))))))
+
+(defn stitch-panorama!
+  "Stitches the selected frames into a panorama (new float TIFF next to the first
+  frame, imported, with a crop that hides the ragged edge)."
+  []
+  (run-combine! "PANORAMA"
+                (fn [ps progress] (combine/pano ps {:progress progress}))
+                (fn [{:keys [file valid-rect]}]
+                  (when valid-rect
+                    (let [p (.getPath ^File file)]
+                      (update-catalog! (fn [c] (-> c (cat/set-adj p :crop (mapv double valid-rect)) (cat/set-adj p :aspect "orig")
+                                                  (cat/commit p "PANORAMA CROP"))))))
+                  (toast! "PANORAMA READY"))))
+
 ;; ---------------------------------------------------------------- hot folder
 
 (defonce ^:private stop-watch (atom nil))
@@ -686,7 +735,7 @@
   []
   (let [c (:catalog @state)]
     (count (keep (fn [p] (try (xmp/write-sidecar! p (xmp-data c p)) (catch Exception _ nil)))
-                 (remove darkroom.imaging.paths/virtual-copy? (frames))))))
+                 (remove paths/virtual-copy? (frames))))))
 
 
 

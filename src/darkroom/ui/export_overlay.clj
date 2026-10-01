@@ -200,13 +200,15 @@
                           [:selection (str "SELECTION " n-sel) (str "Export the " n-sel " selected frames")]
                           [:shoot (str "SHOOT " n-all) (str "Export all " n-all " frames of the shoot")]]
                          (:scope o) (fn [v] (set-opt! :scope v)))
-             (pill-group (box :fmt) (map (fn [f] [f (.toUpperCase ^String (name f)) (:label (export/formats f))]) [:jpeg :png :tiff :webp])
+             (pill-group (box :fmt) (map (fn [f] [f (.toUpperCase ^String (name f)) (:label (export/formats f))]) [:jpeg :png :tiff :tiff32 :webp])
                          fmt (fn [f] (swap! st/state assoc :fmt f)))
              (pill-group (box :size) [[1080 "1080 PX" "Long edge 1080 pixels"] [2048 "2048 PX" "Long edge 2048 pixels"] [0 "FULL RES" "Full resolution"]]
                          (:size s) (fn [v] (swap! st/state assoc :size v)))
-             (pill-group (box :space) (map (fn [sp] [sp (.toUpperCase ^String (:label (color/spaces sp))) (str "Colour space " (:label (color/spaces sp)))])
-                                           [:srgb :display-p3 :adobe-rgb])
-                         (if webp? :srgb (:cspace s)) (fn [sp] (when-not webp? (swap! st/state assoc :cspace sp))))
+             (if (= :tiff32 fmt)
+               (pill-group (box :space) [[:none "LINEAR WORKING SPACE" "Scene-referred: stored unconverted in the linear working space"]] :none (fn [_] nil))
+               (pill-group (box :space) (map (fn [sp] [sp (.toUpperCase ^String (:label (color/spaces sp))) (str "Colour space " (:label (color/spaces sp)))])
+                                             [:srgb :display-p3 :adobe-rgb])
+                           (if webp? :srgb (:cspace s)) (fn [sp] (when-not webp? (swap! st/state assoc :cspace sp)))))
              (pill-group (box :sharpen) [[nil "OFF" "No output sharpening"] [:screen "SCREEN" "Sharpen for screen"]
                                          [:matte "MATTE PRINT" "Sharpen for matte paper"] [:glossy "GLOSSY PRINT" "Sharpen for glossy paper"]]
                          (:sharpen o) (fn [v] (set-opt! :sharpen v)))

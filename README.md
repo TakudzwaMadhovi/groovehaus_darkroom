@@ -51,7 +51,7 @@ is stored as EDN in the per-user data folder
   filmstrip "THE ROLL".
 - **Export** (`⌘E`): this frame, the selection or the whole shoot (batch, with progress);
   JPEG, PNG, TIFF (16-bit, deflate) or WebP; long edge 1080 / 2048 / full; colour space
-  (sRGB, Display P3, Adobe RGB; WebP is always sRGB); JPEG / WebP quality; output
+  (sRGB, Display P3, Adobe RGB; WebP is always sRGB; `TIFF32` stores the linear working space unconverted); JPEG / WebP quality; output
   sharpening for screen, matte or glossy print (low / standard / high, applied after the
   resize); metadata (all camera data, copyright and creator only, or none; the frame's own
   creator / copyright notes override the camera's); optional text watermark with position;
@@ -81,6 +81,30 @@ adjustment (one history step, `PROFILE OFF` removes it) and stacks with the manu
 distortion and fringe sliders. Not implemented: vignetting, the ACM and poly3 TCA models,
 lens-centre offsets, and matching by anything but the EXIF lens name (a lens whose name
 the camera writes differently from the database finds no profile; the toast says so).
+
+### HDR merge and panoramas
+
+Select two or more frames in the Library and use `HDR MERGE` or `PANORAMA` (right-hand panel).
+The frames are read unedited at full resolution and the result is saved next to the first
+frame as `<name>-HDR.tif` / `<name>-Pano.tif` (never overwriting), imported, and selected.
+
+- **HDR merge** works in linear light on the float scene images: frames are aligned (phase
+  correlation, whole-pixel translation, so a hand-held bracket is fine; rotation is not
+  corrected), their relative exposures come from the EXIF shutter / ISO / aperture (or, when
+  a frame lacks them, from the pictures, chained through neighbouring frames), and every
+  pixel is the weighted mean of the frames' values divided by their exposure; clipped and
+  noise-level samples weigh nothing and longer exposures weigh more. Highlights the middle
+  frame clipped come back above 1.0. Best from RAW; JPEG brackets work but their tone curve
+  is only approximately undone.
+- **Panorama**: AKAZE features, homographies by RANSAC refined by ECC, frames chained through
+  the strongest overlaps, gain compensation for exposure differences, feathered blending, and
+  a crop applied to the new frame that hides the ragged edge (drag it larger on the CROP tab).
+  Needs roughly 20–30% overlap and some texture. Planar homographies suit modest fields of
+  view; there is no cylindrical / spherical projection or bundle adjustment, so wide sweeps or
+  scenes with strong parallax will misalign. Linux needs the GTK 2 libraries (`libgtk2.0-0`)
+  for OpenCV's feature modules.
+- The result is a **32-bit float TIFF** in the linear working space (also an export format,
+  `TIFF32`): bit-exact, nothing above 1.0 clipped, tagged with a linear ICC profile.
 
 ### Camera profiles (RAW)
 
@@ -146,6 +170,7 @@ by path, modification time and size.
 | `darkroom.imaging.histogram` / `export` / `browser` | Histogram, JPEG / PNG / 16-bit TIFF / WebP writers (ICC, EXIF), folder scan + thumbnails |
 | `darkroom.imaging.output` | File-name templates, output sharpening, watermark, metadata modes, rendering one or many frames to disk |
 | `darkroom.catalog` | Pure library model: shoots, frames, ratings, reject flags, colour labels, keywords, notes, adjustments, undo / redo history, snapshots, user presets, virtual copies, copy / paste, search and sort; EDN persistence |
+| `darkroom.imaging.merge` / `panorama` / `combine` | HDR bracket merge, panorama stitching in linear light, and saving the result as a float TIFF frame |
 | `darkroom.imaging.dcp` / `camera` | DNG camera profile (.dcp) reader; camera RGB → XYZ → working space with the profile's matrices, hue/sat/val table, look table and tone curve |
 | `darkroom.imaging.lens` / `watch` | lensfun profile lookup, interpolation and rescaling; hot-folder watcher |
 | `darkroom.imaging.xmp` / `paths` / `thumbcache` | XMP sidecar read / write; virtual-copy paths (`file#vcN`); on-disk thumbnail cache |
