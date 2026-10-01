@@ -281,3 +281,33 @@
     (is (= [a c] (st/grid-frames @st/state)))
     (st/nav! 1)
     (is (= [a b c] (st/grid-frames @st/state)) "moving drops the selection and so the survey")))
+
+(deftest saving-over-an-external-change-keeps-the-other-copy
+  (shoot-with "a.png")
+  (st/save-now!)
+  (let [f @st/catalog-file
+        kept (fn [] (filter #(re-find #"conflict-" (.getName %)) (.listFiles (.getParentFile f))))]
+    (is (.exists f))
+    (spit f "{:shoots [] :frames {} :other-machine true}")
+    (.setLastModified f (+ (.lastModified f) 10000))
+    (st/rate! 3)
+    (st/save-now!)
+    (is (some #(re-find #"other-machine" (slurp %)) (kept)) "the other version was kept")
+    (let [n (count (kept))]
+      (st/rate! 4)
+      (st/save-now!)
+      (is (= n (count (kept))) "our own later saves are not conflicts"))))
+
+(deftest hot-folder-imports-and-keeps-the-view
+  (let [d (tmp-dir) lib (tmp-dir)]
+    (st/create-shoot! "LIVE" [])
+    (swap! st/state assoc :view :develop)
+    (is (st/watch-folder! d))
+    (is (= (.getPath d) (:watch @st/state)))
+    (let [p (png! d "shot1.png")]
+      (let [end (+ (System/currentTimeMillis) 8000)]
+        (loop [] (when (and (empty? (st/frames)) (< (System/currentTimeMillis) end)) (Thread/sleep 100) (recur))))
+      (is (= [p] (st/frames)))
+      (is (= :develop (:view @st/state)) "a hot-folder import does not change the view"))
+    (st/stop-watching!)
+    (is (nil? (:watch @st/state)))))

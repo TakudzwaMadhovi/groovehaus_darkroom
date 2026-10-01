@@ -23,14 +23,17 @@
     :query     library search/sort/filter {:text :min-rating :colour :keyword :sort :dir :rejected}
     :sel       set of multi-selected frames (library); actions use `selection`
     :clipboard settings copied with copy-settings!
+    :watch     folder being watched for new frames (hot folder), or nil
     :meta-rev  bumped when camera metadata finishes loading (re-sorts/re-searches)"
   (:require [clojure.java.io :as io]
             [darkroom.catalog :as cat]
             [darkroom.imaging.browser :as browser]
             [darkroom.imaging.exif :as exif]
             [darkroom.imaging.local :as local]
+            [darkroom.imaging.watch :as watch]
             [darkroom.imaging.xmp :as xmp])
   (:import (java.io File)
+           (javafx.application Platform)
            (java.util.concurrent Executors ScheduledExecutorService ScheduledFuture ThreadFactory TimeUnit)))
 
 (defonce state
@@ -103,6 +106,26 @@
 
 (defonce ^:private pending-save (atom nil))
 (defonce catalog-file (atom (cat/default-file)))
+(defonce ^:private seen-mtime (atom 0))
+
+(declare toast!)
+
+(defn- run-ui!
+  "Runs `f` on the FX thread (directly when the toolkit is not running, e.g. in tests)."
+  [f]
+  (try (Platform/runLater f) (catch IllegalStateException _ (f))))
+
+(defn- write-catalog!
+  "Saves `c`. If another program or computer changed the file since this one
+  last read or wrote it (a shared sync folder), the other version is first set
+  aside as catalog.edn.conflict-<time> so nothing is lost silently."
+  [c]
+  (let [^File f @catalog-file]
+    (when (cat/changed-on-disk? f @seen-mtime)
+      (let [aside (cat/set-aside! f)]
+        (run-ui! #(toast! (str "CATALOG CHANGED ELSEWHERE — OLD COPY KEPT AS " (.getName aside))))))
+    (cat/save! c f)
+    (reset! seen-mtime (.lastModified f))))
 
 (defn save-soon!
   "Writes the catalog about 600 ms after the last change (debounced)."
@@ -112,7 +135,7 @@
     (reset! pending-save
             (.schedule saver
                        ^Runnable (fn []
-                                   (try (cat/save! c @catalog-file)
+                                   (try (write-catalog! c)
                                         (catch Throwable t
                                           (binding [*out* *err*] (println "catalog save failed:" (.getMessage t))))))
                        600 TimeUnit/MILLISECONDS))))
@@ -121,7 +144,7 @@
   "Flushes the catalog synchronously (use on exit)."
   []
   (when-let [^ScheduledFuture f @pending-save] (.cancel f false))
-  (try (cat/save! (:catalog @state) @catalog-file) (catch Throwable _ nil)))
+  (try (write-catalog! (:catalog @state)) (catch Throwable _ nil)))
 
 (defn update-catalog! [f & args]
   (swap! state update :catalog #(apply f % args))
@@ -238,8 +261,10 @@
 
 (defn import-paths!
   "Adds images to the current shoot (creating FIRST SHOOT if there is none).
-  Selects the first newly added frame. Returns the number of new frames."
-  [paths]
+  Selects the first newly added frame and shows the Library, unless
+  `:keep-view? true` (hot-folder imports: select the newest, stay where you are).
+  Returns the number of new frames."
+  [paths & [{:keys [keep-view?]}]]
   (let [paths (vec (distinct paths))]
     (when (seq paths)
       (when-not (:shoot @state) (create-shoot! "FIRST SHOOT" []))
@@ -250,7 +275,9 @@
           ;; a sidecar next to a new file brings its rating, label, keywords and edits
           (when (seq new)
             (update-catalog! (fn [c] (reduce (fn [c p] (if-let [x (xmp/read-sidecar p)] (cat/apply-xmp-data c p x) c)) c new))))
-          (when (seq new) (swap! state assoc :cur (first new) :view :library))
+          (when (seq new)
+            (swap! state (fn [st] (cond-> (assoc st :cur (if keep-view? (last new) (first new)))
+                                    (not keep-view?) (assoc :view :library)))))
           (count new))))))
 
 (defn rate!
@@ -447,6 +474,34 @@
         (save-soon!)
         (count ps)))))
 
+;; ---------------------------------------------------------------- hot folder
+
+(defonce ^:private stop-watch (atom nil))
+
+(defn stop-watching!
+  "Stops the hot folder, if one is watched."
+  []
+  (when-let [stop @stop-watch] (reset! stop-watch nil) (stop))
+  (swap! state assoc :watch nil))
+
+(defn watch-folder!
+  "Imports every image that appears in `dir` into the current shoot as it
+  finishes being written (tethered-style capture through a camera's save-to-folder
+  setting). The newest frame becomes current; the view does not change. Replaces
+  any earlier watch. Returns the folder."
+  [^File dir]
+  (stop-watching!)
+  (when (.isDirectory dir)
+    (reset! stop-watch
+            (watch/start! dir (fn [paths]
+                                (run-ui!
+                                  (fn []
+                                    (let [n (import-paths! paths {:keep-view? true})]
+                                      (when (pos? (or n 0))
+                                        (toast! (str n " NEW FRAME" (when (not= n 1) "S") " FROM FOLDER"))))))))) 
+    (swap! state assoc :watch (.getPath dir))
+    dir))
+
 ;; ------------------------------------------------------------ metadata / XMP
 
 (defonce ^:private meta-reader (atom nil)) ; :starting while a reader thread runs
@@ -498,6 +553,7 @@
   []
   (let [c (cat/load! @catalog-file)
         s (first (:shoots c))]
+    (reset! seen-mtime (.lastModified ^File @catalog-file))
     (swap! state assoc :catalog c :shoot (:id s) :cur (first (:paths s)))))
 
 (defn open-file!

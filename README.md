@@ -67,6 +67,19 @@ green / blue label · `⌘Z` undo · `⌘⇧Z` or `⌘Y` redo · `⌘⇧C` / `�
 `J` clipping view · `N` survey · `G` Library · `D` Develop · `↵` open (Library).
 (`⌘` is `Ctrl` on Windows and Linux.) Double-click or click a slider's label to reset it.
 
+### Hot folder and sharing a catalog
+
+- `WATCH FOLDER` (Library toolbar) imports every image that appears in a folder into the
+  open shoot once it has finished being written; the newest frame becomes current. Point
+  your camera software's save-to-folder setting at it for tethered-style shooting. This
+  does not control the camera or show live view.
+- To use one catalog on several computers, put it in a folder your sync tool shares
+  (Dropbox, iCloud Drive, Syncthing): start with `-Dgroovehaus.catalog=/path/catalog.edn`
+  or set `GROOVEHAUS_CATALOG`. Open it on one computer at a time. If the file was changed
+  by another computer since this one last read or wrote it, the other version is kept
+  beside it as `catalog.edn.conflict-<time>` before being overwritten; nothing merges
+  automatically.
+
 ### Metadata and sidecars
 
 Ratings, colour labels, keywords, title / caption / creator / copyright and this app's

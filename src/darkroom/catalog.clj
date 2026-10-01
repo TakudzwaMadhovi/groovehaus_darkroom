@@ -472,7 +472,27 @@
       (str/includes? os "win") (File. (or (System/getenv "APPDATA") home) "Groovehaus Darkroom")
       :else                    (File. home ".local/share/groovehaus-darkroom"))))
 
-(defn default-file ^File [] (File. (app-dir) "catalog.edn"))
+(defn default-file
+  "The catalog file: `-Dgroovehaus.catalog=<file>` or the GROOVEHAUS_CATALOG
+  environment variable when set (point it into a Dropbox / iCloud / Syncthing
+  folder to share one catalog between computers), else catalog.edn in the data folder."
+  ^File []
+  (if-let [p (not-empty (or (System/getProperty "groovehaus.catalog") (System/getenv "GROOVEHAUS_CATALOG")))]
+    (File. ^String p)
+    (File. (app-dir) "catalog.edn")))
+
+(defn changed-on-disk?
+  "True when `file` exists and was modified after `seen-mtime` (a long, 0 when
+  the file had not been seen), i.e. something else wrote it."
+  [^File file seen-mtime]
+  (and (.exists file) (not= (.lastModified file) (long seen-mtime))))
+
+(defn set-aside!
+  "Copies `file` to `file.conflict-<millis>` (kept next to it) and returns that File."
+  ^File [^File file]
+  (let [aside (File. (str file ".conflict-" (System/currentTimeMillis)))]
+    (Files/copy (.toPath file) (.toPath aside) (into-array java.nio.file.CopyOption [StandardCopyOption/REPLACE_EXISTING]))
+    aside))
 
 (defn save!
   "Writes the catalog as EDN atomically (temp file + move)."

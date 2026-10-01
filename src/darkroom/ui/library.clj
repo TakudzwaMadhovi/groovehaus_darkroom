@@ -187,6 +187,15 @@
                                     (.setOnAction (w/handler (fn [_] (st/set-query! :colour (when (not= c (:colour (:query @st/state))) c))))))]))
         survey-btn (doto (w/pill "SURVEY" (fn [] (swap! st/state update :survey not)) "xs")
                      (w/set-base-a11y! "Survey: show the selected frames large (N)"))
+        watch-btn  (doto (w/pill "WATCH FOLDER" (fn []
+                                                  (if (:watch @st/state)
+                                                    (do (st/stop-watching!) (st/toast! "STOPPED WATCHING"))
+                                                    (let [ch (doto (javafx.stage.DirectoryChooser.) (.setTitle "Watch a folder for new frames"))]
+                                                      (when-let [d (.showDialog ch (first (javafx.stage.Window/getWindows)))]
+                                                        (st/watch-folder! d)
+                                                        (st/toast! (str "WATCHING " (.toUpperCase (.getName d))))))))
+                                         "xs")
+                     (w/set-base-a11y! "Watch a folder: new frames are imported as they are saved"))
         toolbar2   (doto (FlowPane. 14.0 6.0) (.setAlignment Pos/CENTER_LEFT) (.setPadding (Insets. 6 24 6 24)))
         ;; metadata / actions panel
         info-panel (info/create)
@@ -261,7 +270,7 @@
     (w/classes! search "gh-input")
     (w/a11y! search "Search the shoot")
     (.addListener (.textProperty search) (w/change-listener (fn [t] (st/set-query! :text (when-not (clojure.string/blank? t) t)))))
-    (apply w/add! toolbar2 search sort-btn dir-btn (concat (map colour-btns cat/colour-labels) [survey-btn]))
+    (apply w/add! toolbar2 search sort-btn dir-btn (concat (map colour-btns cat/colour-labels) [survey-btn watch-btn]))
     (w/classes! side-scroll "panel" "rule-left")
     (.setStyle side-scroll "-fx-background-color: transparent;")
     (w/add! side (w/tlabel "INFO" :wide "sys" "dim") (:node info-panel) (w/tlabel "ACTIONS" :wide "sys" "dim") act-pills)
@@ -347,6 +356,8 @@
          (let [t (str (:text (:query s)))]
            (when (and (not (.isFocused search)) (not= t (.getText search))) (.setText search t)))
          (w/set-on! survey-btn (st/survey? s))
+         (.setText watch-btn (theme/tracked (if (:watch s) "WATCHING ■" "WATCH FOLDER") :normal))
+         (w/set-on! watch-btn (boolean (:watch s)))
          (.setDisable survey-btn (and (not (:survey s)) (< (count (:sel s)) 2)))
          ((:sync! info-panel) s)
          (when (not= sig-grid (:grid @memo))

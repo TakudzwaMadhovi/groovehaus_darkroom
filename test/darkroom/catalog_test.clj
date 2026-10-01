@@ -292,3 +292,24 @@
       (is (= ["/x/IMG_10.jpg" "/x/IMG_2.jpg" "/x/dj_set.jpg"] (q {:sort :capture})))
       (is (= ["/x/dj_set.jpg" "/x/IMG_2.jpg" "/x/IMG_10.jpg"] (q {:sort :capture :dir :desc})))
       (is (= ["/x/IMG_10.jpg" "/x/IMG_2.jpg" "/x/dj_set.jpg"] (q {:sort :edited :dir :desc}))))))
+
+(deftest catalog-location-can-be-moved-into-a-sync-folder
+  (let [old (System/getProperty "groovehaus.catalog")]
+    (try
+      (System/setProperty "groovehaus.catalog" "/tmp/shared/cat.edn")
+      (is (= "/tmp/shared/cat.edn" (.getPath (cat/default-file))))
+      (finally (if old (System/setProperty "groovehaus.catalog" old) (System/clearProperty "groovehaus.catalog"))))
+    (is (= "catalog.edn" (.getName (cat/default-file))))))
+
+(deftest external-changes-are-detected-and_kept
+  (let [d (.toFile (java.nio.file.Files/createTempDirectory "cat-sync" (into-array java.nio.file.attribute.FileAttribute [])))
+        f (java.io.File. d "catalog.edn")]
+    (is (not (cat/changed-on-disk? f 0)) "a missing file is not a change")
+    (spit f "{}")
+    (let [seen (.lastModified f)]
+      (is (not (cat/changed-on-disk? f seen)))
+      (.setLastModified f (+ seen 5000))
+      (is (cat/changed-on-disk? f seen))
+      (let [aside (cat/set-aside! f)]
+        (is (= "{}" (slurp aside)))
+        (is (re-find #"catalog\.edn\.conflict-\d+$" (.getName aside)))))))
