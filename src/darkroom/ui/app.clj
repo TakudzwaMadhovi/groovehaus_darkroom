@@ -167,7 +167,8 @@
               (when dev?
                 (let [path (:cur s)]
                   (cond
-                    (or (not= :develop (:view old)) (not= path (:cur old)) (not= (:before old) (:before s)))
+                    (or (not= :develop (:view old)) (not= path (:cur old)) (not= (:before old) (:before s))
+                        (not= (= :crop (:tab old)) (= :crop (:tab s))))
                     ((:request! canvas) s :preview)
                     (and path (not= (cat/adj (:catalog old) path) (cat/adj (:catalog s) path)))
                     ((:request! canvas) s :draft))))))]

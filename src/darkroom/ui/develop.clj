@@ -2,8 +2,12 @@
   "Develop view: canvas with before/after, histogram, tabbed adjustment panel
   (BASIC, CURVE, LOOK, CROP, PRESETS, HISTORY) and the filmstrip."
   (:require [darkroom.catalog :as cat]
+            [darkroom.imaging.crop :as crop]
             [darkroom.imaging.develop :as develop]
+            [darkroom.imaging.geometry :as geometry]
             [darkroom.imaging.pipeline :as pipeline]
+            [darkroom.ui.canvas :as canvas]
+            [darkroom.ui.crop-overlay :as crop-overlay]
             [darkroom.ui.curve :as curve]
             [darkroom.ui.histogram-view :as histogram-view]
             [darkroom.ui.state :as st]
@@ -49,7 +53,12 @@
            [:fade "FADE" 0 1 0.01 {:pct? true}]
            [:grain "GRAIN" 0 1 0.01 {:pct? true}]
            [:vignette "VIGNETTE" 0 1 0.01 {:pct? true}]]
-   :crop  [[:angle "STRAIGHTEN" -15 15 0.1 {:decimals 1}]]})
+   :crop  [[:angle "STRAIGHTEN" -15 15 0.1 {:decimals 1}]]
+   :lens  [[:persp-v "VERTICAL" -1 1 0.01 {:pct? true}]
+           [:persp-h "HORIZONTAL" -1 1 0.01 {:pct? true}]
+           [:distortion "DISTORTION" -1 1 0.01 {:pct? true}]
+           [:ca-red "RED / CYAN FRINGE" -1 1 0.01 {:pct? true}]
+           [:ca-blue "BLUE / YELLOW FRINGE" -1 1 0.01 {:pct? true}]]})
 
 (def ^:private tab-labels
   [[:basic "BASIC"] [:detail "DETAIL"] [:color "COLOR"] [:curve "CURVE"] [:look "LOOK"] [:crop "CROP"]
@@ -83,25 +92,89 @@
     {:node (apply w/vbox 18 (map :node rows))
      :sync! (fn [adj] (doseq [{:keys [key set-value!]} rows] (set-value! (get adj key))))}))
 
+(defn- frame-aspect
+  "Width / height of the current frame's uncropped, turned image."
+  []
+  (let [s @st/state adj (st/cur-adj s)]
+    (canvas/frame-aspect (:cur s) (or (:rotate adj) 0))))
+
+(def ^:private aspect-pills
+  [["free" "FREE"] ["orig" "ORIGINAL"] ["1:1" "1:1"] ["4:5" "4:5"] ["3:2" "3:2"] ["16:9" "16:9"]])
+
+(defn- pick-aspect!
+  "Chooses the crop's aspect: FREE just releases the lock; ORIGINAL clears the
+  crop; a preset becomes the largest centred crop of that ratio."
+  [a]
+  (st/set-adj! :aspect a)
+  (case a
+    "free" nil
+    "orig" (st/set-adj! :crop nil)
+    (st/set-adj! :crop (mapv double (crop/centered (geometry/aspect-ratios a) (frame-aspect)))))
+  (st/commit! (str "CROP " (clojure.string/upper-case (if (= a "orig") "original" a)))))
+
+(defn- turn!
+  "Quarter-turn the picture by `d` (+1 clockwise); the old crop no longer fits."
+  [d]
+  (let [r (or (:rotate (st/cur-adj @st/state)) 0)]
+    (st/set-adj! :rotate (mod (+ r d) 4))
+    (st/set-adj! :crop nil)
+    (st/commit! (if (pos? d) "ROTATE RIGHT" "ROTATE LEFT"))))
+
+(defn- crop-rect-rows
+  "Four sliders (LEFT, TOP, WIDTH, HEIGHT as % of the frame) for setting the
+  crop precisely or from the keyboard."
+  []
+  (let [labels ["LEFT" "TOP" "WIDTH" "HEIGHT"]
+        current (fn [] (let [adj (st/cur-adj @st/state) a (frame-aspect)]
+                         (vec (geometry/crop-fractions adj a 1.0))))
+        set-part! (fn [i v]
+                    (let [[x y w h] (current)
+                          r (assoc [x y w h] i (/ (double v) 100.0))
+                          [x y w h] r
+                          w (max crop/min-size (min 1.0 w)) h (max crop/min-size (min 1.0 h))]
+                      (st/set-adj! :crop [(max 0.0 (min x (- 1.0 w))) (max 0.0 (min y (- 1.0 h))) w h])))]
+    (vec (for [[i label] (map-indexed vector labels)]
+           (assoc (w/slider-row {:label label :min 0 :max 100 :step 1 :decimals 0 :value (if (>= i 2) 100.0 0.0)
+                                 :default (if (>= i 2) 100.0 0.0)
+                                 :on-input  (fn [v] (set-part! i v))
+                                 :on-commit (fn [] (st/commit! (str "CROP " label)))
+                                 :on-reset  (fn [] (set-part! i (if (>= i 2) 100.0 0.0)) (st/commit! (str "CROP " label " RESET")))})
+                  :i i)))))
+
 (defn- crop-body []
-  (let [rows   (sliders-for :crop)
-        aspects [["orig" "ORIGINAL"] ["1:1" "1:1"] ["4:5" "4:5"] ["3:2" "3:2"] ["16:9" "16:9"]]
-        holder (w/vbox 14)
-        flip   (w/pill "FLIP HORIZONTAL" (fn [] (st/set-adj! :flip (not (:flip (st/cur-adj @st/state))))
-                                           (st/commit! "FLIP")) "sm")]
-    {:node (w/vbox 18 (:node (first rows)) holder)
+  (let [angle  (first (sliders-for :crop))
+        lens   (sliders-for :lens)
+        rect   (crop-rect-rows)
+        aspects (FlowPane. 8.0 8.0)
+        pills  (into {} (for [[v label] aspect-pills]
+                          [v (doto (w/pill label (fn [] (pick-aspect! v)) "sm")
+                               (w/set-base-a11y! (str "Aspect " label)))]))
+        flip-h (w/pill "FLIP HORIZONTAL" (fn [] (st/set-adj! :flip (not (:flip (st/cur-adj @st/state)))) (st/commit! "FLIP")) "sm")
+        flip-v (w/pill "FLIP VERTICAL" (fn [] (st/set-adj! :flip-v (not (:flip-v (st/cur-adj @st/state)))) (st/commit! "FLIP VERTICAL")) "sm")
+        left   (w/pill "↺ 90°" (fn [] (turn! -1)) "sm")
+        right  (w/pill "↻ 90°" (fn [] (turn! 1)) "sm")
+        reset  (w/button (theme/tracked "RESET CROP" :normal)
+                         (fn [] (st/set-adj! :crop nil) (st/set-adj! :aspect "orig") (st/commit! "CROP RESET"))
+                         "text-btn" "quiet")]
+    (w/a11y! left "Rotate left 90 degrees")
+    (w/a11y! right "Rotate right 90 degrees")
+    (doseq [[_ b] pills] (.add (.getChildren aspects) b))
+    {:node (w/vbox 18
+                   (w/tlabel "ASPECT" :normal "sys" "dim") aspects
+                   (doto (FlowPane. 8.0 8.0) (.. getChildren (addAll (java.util.Arrays/asList (into-array javafx.scene.Node [left right flip-h flip-v])))))
+                   (:node angle)
+                   (w/tlabel "CROP" :wide "sys" "dim") (apply w/vbox 18 (map :node rect))
+                   reset
+                   (w/tlabel "PERSPECTIVE & LENS" :wide "sys" "dim") (apply w/vbox 18 (map :node lens)))
      :sync! (fn [adj]
-              ((:set-value! (first rows)) (:angle adj))
-              (w/set-on! flip (boolean (:flip adj)))
-              (w/keep-focus!
-                holder
-                (fn []
-                  (w/clear! holder)
-                  (w/add! holder
-                          (w/tlabel "ASPECT" :normal "sys" "dim")
-                          (pill-row aspects (:aspect adj)
-                                    (fn [a] (st/set-adj! :aspect a) (st/commit! (str "CROP " (clojure.string/upper-case a)))))
-                          flip))))}))
+              ((:set-value! angle) (:angle adj))
+              (w/set-on! flip-h (boolean (:flip adj)))
+              (w/set-on! flip-v (boolean (:flip-v adj)))
+              (doseq [[v b] pills] (w/set-on! b (= v (or (:aspect adj) "orig"))))
+              (let [a (frame-aspect)
+                    [x y w h] (geometry/crop-fractions adj a 1.0)]
+                (doseq [{:keys [i set-value!]} rect] (set-value! (* 100.0 (nth [x y w h] i)))))
+              (doseq [{:keys [key set-value!]} lens] (set-value! (get adj key))))}))
 
 (defn- presets-body []
   (let [col (w/vbox 0)]
@@ -239,6 +312,7 @@
         rating   (w/label "" "sys-13" "sys" "muted")
         before   (w/pill "AFTER" (fn [] (swap! st/state update :before not)))
         hist     (histogram-view/create)
+        overlay  (crop-overlay/create iv)
         tabs     (doto (FlowPane. 14.0 0.0) (.setPadding (Insets. 0 24 0 24)))
         tab-btns (vec (for [[k l] tab-labels]
                         [k (doto (w/button (theme/tracked l :normal) (fn [] (swap! st/state assoc :tab k)) "tab-btn")
@@ -255,7 +329,7 @@
     (.bind (.fitWidthProperty iv) (.subtract (.widthProperty canvas) 40))
     (.bind (.fitHeightProperty iv) (.subtract (.heightProperty canvas) 40))
     (w/classes! canvas "ground")
-    (w/add! canvas iv loading)
+    (w/add! canvas iv (:node overlay) loading)
     (w/classes! body-box "panel")
     (.setStyle body-scroll "-fx-background-color: transparent;")
     (apply w/add! tabs (map second tab-btns))
@@ -325,6 +399,7 @@
                    (.clear (.getChildren body-box))
                    (.add (.getChildren body-box) (:node @body)))
                  (when (and @body adj) ((:sync! @body) adj))
+                 ((:refresh! overlay) s)
                  ;; filmstrip
                  (let [sig [fs path (mapv #(cat/edited? c %) fs)]]
                    (when (not= sig (:strip @memo))

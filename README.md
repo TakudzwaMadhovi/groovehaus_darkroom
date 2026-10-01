@@ -34,7 +34,8 @@ is stored as EDN in the per-user data folder
   vibrance, saturation), DETAIL (texture, clarity, dehaze, sharpening with radius and
   edge masking, luminance and colour noise reduction), COLOR (8-band HSL mixer, split
   toning with balance), CURVE (RGB and per-channel red/green/blue curves), LOOK (B&W,
-  fade, grain, vignette), CROP (straighten, aspect, flip), PRESETS, HISTORY;
+  fade, grain, vignette), CROP (interactive crop rectangle with aspect lock, straighten,
+  90° turns, flips, perspective, lens distortion, chromatic aberration), PRESETS, HISTORY;
   filmstrip "THE ROLL".
 - **Export** (`⌘E`): JPEG/PNG, long edge 1080 / 2048 / full, colour space (sRGB,
   Display P3, Adobe RGB), JPEG quality, destination folder. Renders the full-resolution
@@ -51,8 +52,10 @@ Shortcuts: `⌘I` import · `⌘E`/`E` export · `Esc` close · `\` hold = befor
 |---|---|
 | `darkroom.imaging.color` | Colour science: RGB spaces, 3x3 matrices, transfer curves, Bradford adaptation, white-balance (temperature/tint) matrix, ICC profile generation |
 | `darkroom.imaging.scene` | Float scene-linear images in the working space; conversion from 8-bit sRGB / LibRaw 16-bit and to 8/16-bit output spaces; LUT helpers; linear-light box downscale |
+| `darkroom.imaging.geometry` | Crop, straighten, quarter turns, flips, perspective, lens distortion, CA correction in one resampling pass with an exact fill-zoom; resize |
+| `darkroom.imaging.crop` | The crop rectangle's drag maths (move, resize, draw, aspect lock, hit testing) |
 | `darkroom.imaging.core` | 8-bit ARGB pixel helpers: load, `fit`, `orient`, legacy brightness/contrast/gamma ops |
-| `darkroom.imaging.develop` | Develop engine on scene images: tone pipeline (linear exposure + white balance, then perceptual-domain edits), curve LUT, geometry (crop/straighten/flip), resize |
+| `darkroom.imaging.develop` | Tone engine on scene images: linear exposure + white balance, then perceptual-domain edits (whites/blacks, shadows/highlights, contrast, curves, HSL, vibrance, split toning, B&W, vignette, grain) |
 | `darkroom.imaging.denoise` | OpenCV non-local-means denoise on 16-bit data (offline, CPU) |
 | `darkroom.imaging.detail` | Texture, clarity, sharpening (luminance only), dehaze, chroma-noise reduction; Gaussian blur on a reduced copy for large radii |
 | `darkroom.imaging.pipeline` | Stages denoise → colour NR → geometry → dehaze → tone → detail, with a per-stage cache for interactive use |
@@ -61,7 +64,7 @@ Shortcuts: `⌘I` import · `⌘E`/`E` export · `Esc` close · `\` hold = befor
 | `darkroom.catalog` | Pure library model: shoots, frames, ratings, adjustments, history, presets; EDN persistence |
 | `darkroom.ui.state` | App state atom and actions |
 | `darkroom.ui.theme` / `widgets` / `darkroom.css` | Fonts, stylesheet, tracked text, buttons, slider |
-| `darkroom.ui.header` / `library` / `develop` / `curve` / `export-overlay` / `app` | Views and wiring |
+| `darkroom.ui.header` / `library` / `develop` / `curve` / `crop-overlay` / `export-overlay` / `app` | Views and wiring |
 | `darkroom.ui.canvas` / `thumbs` | Background loading, rendering and thumbnail caches |
 
 ## Accessibility

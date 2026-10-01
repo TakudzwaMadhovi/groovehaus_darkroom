@@ -1,7 +1,7 @@
 (ns darkroom.imaging.develop
-  "The Develop-view image engine on float scene images (darkroom.imaging.scene):
-  geometry (straighten / aspect crop / flip), the tone pipeline, the tone curve
-  and resize. Pure logic, no UI dependency.
+  "The Develop-view tone engine on float scene images (darkroom.imaging.scene):
+  the tone pipeline and the tone curve. (Geometry and resize live in
+  darkroom.imaging.geometry.) Pure logic, no UI dependency.
 
   Exposure and white balance act in linear light, where they are physically
   meaningful. The remaining tone steps (shadows/highlights, contrast, fade,
@@ -13,6 +13,7 @@
   Settings are a map; see `defaults`."
   (:require [darkroom.imaging.color :as color]
             [darkroom.imaging.core :as core]
+            [darkroom.imaging.geometry :as geometry]
             [darkroom.imaging.scene :as scene]))
 
 (set! *unchecked-math* :warn-on-boxed)
@@ -28,24 +29,20 @@
   (vec (repeat (count hsl-bands) [0.0 0.0 0.0])))
 
 (def defaults
-  "Neutral values for every Develop setting."
-  {:exposure 0.0 :contrast 0.0 :highlights 0.0 :shadows 0.0 :whites 0.0 :blacks 0.0
-   :temp 0.0 :tint 0.0 :vibrance 0.0 :saturation 0.0 :hsl default-hsl
-   :split-sh-hue 220.0 :split-sh-sat 0.0 :split-hl-hue 40.0 :split-hl-sat 0.0 :split-balance 0.0
-   :fade 0.0 :bw 0.0 :grain 0.0 :vignette 0.0
-   :angle 0.0 :aspect "orig" :flip false
-   :curve default-curve :curve-r default-curve :curve-g default-curve :curve-b default-curve})
+  "Neutral values for every Develop setting (tone here, geometry from
+  darkroom.imaging.geometry)."
+  (merge
+    geometry/defaults
+    {:exposure 0.0 :contrast 0.0 :highlights 0.0 :shadows 0.0 :whites 0.0 :blacks 0.0
+     :temp 0.0 :tint 0.0 :vibrance 0.0 :saturation 0.0 :hsl default-hsl
+     :split-sh-hue 220.0 :split-sh-sat 0.0 :split-hl-hue 40.0 :split-hl-sat 0.0 :split-balance 0.0
+     :fade 0.0 :bw 0.0 :grain 0.0 :vignette 0.0
+     :curve default-curve :curve-r default-curve :curve-g default-curve :curve-b default-curve}))
 
 (def tone-keys
   [:exposure :contrast :highlights :shadows :whites :blacks :temp :tint :vibrance :saturation :hsl
    :split-sh-hue :split-sh-sat :split-hl-hue :split-hl-sat :split-balance
    :fade :bw :grain :vignette :curve :curve-r :curve-g :curve-b])
-
-(def geometry-keys [:angle :aspect :flip])
-
-(def aspect-ratios
-  "Crop aspect ratios; \"orig\" keeps the image's own."
-  {"1:1" 1.0 "4:5" 0.8 "16:9" (/ 16.0 9.0) "3:2" 1.5})
 
 ;; ------------------------------------------------------------------ curve
 
@@ -300,97 +297,3 @@
                 (aset out (+ j 2) (float (scene/lut-at scene/srgb-decode-lut cb))))
               (recur (inc i)))))))
     (scene/image width height out)))
-
-;; --------------------------------------------------------------- geometry
-
-(defn geometry-neutral?
-  [settings]
-  (every? (fn [k] (= (get settings k (defaults k)) (defaults k))) geometry-keys))
-
-(defmacro ^:private sample-bilinear!
-  "Writes the bilinear sample of float RGB `src` (row width `w`, height `h`) at
-  (sx, sy) into `out` at float offset `o`, clamping at the edges."
-  [src w h sx sy out o]
-  `(let [sx#  ~sx sy# ~sy
-         x0#  (Math/floor sx#) y0# (Math/floor sy#)
-         fx#  (- sx# x0#)      fy# (- sy# y0#)
-         xi#  (long x0#)       yi# (long y0#)
-         xa#  (max 0 (min (dec ~w) xi#))   xb# (max 0 (min (dec ~w) (inc xi#)))
-         ya#  (max 0 (min (dec ~h) yi#))   yb# (max 0 (min (dec ~h) (inc yi#)))
-         i00# (* 3 (+ (* ya# ~w) xa#)) i10# (* 3 (+ (* ya# ~w) xb#))
-         i01# (* 3 (+ (* yb# ~w) xa#)) i11# (* 3 (+ (* yb# ~w) xb#))]
-     (dotimes [c# 3]
-       (let [a# (double (aget ~src (+ i00# c#))) b# (double (aget ~src (+ i10# c#)))
-             c0# (double (aget ~src (+ i01# c#))) d# (double (aget ~src (+ i11# c#)))]
-         (aset ~out (+ ~o c#)
-               (float (+ (* (- 1.0 fy#) (+ (* (- 1.0 fx#) a#) (* fx# b#)))
-                         (* fy# (+ (* (- 1.0 fx#) c0#) (* fx# d#))))))))))
-
-(defn geometry
-  "Crop to the aspect ratio (centred), straighten by `angle` degrees and flip
-  horizontally. Rotation zooms in just enough to keep the frame filled. Uses
-  bilinear sampling in linear light; unchanged settings return the same image."
-  [{:keys [^long width ^long height data] :as img} settings]
-  (if (geometry-neutral? settings)
-    img
-    (let [iw    (double width)
-          ih    (double height)
-          aspect (get settings :aspect "orig")
-          ar    (if (= aspect "orig") (/ iw ih) (double (aspect-ratios aspect (/ iw ih))))
-          cw    (min iw (* ih ar))
-          ch    (/ cw ar)
-          w     (max 1 (Math/round cw))
-          h     (max 1 (Math/round ch))
-          th    (Math/toRadians (double (get settings :angle 0.0)))
-          c     (Math/abs (Math/cos th))
-          sn    (Math/abs (Math/sin th))
-          z     (max 1.0 (/ (+ (* cw c) (* ch sn)) iw) (/ (+ (* cw sn) (* ch c)) ih))
-          flip? (boolean (get settings :flip false))
-          cos-t (Math/cos th)
-          sin-t (Math/sin th)
-          ^floats src data
-          ^floats out (float-array (* 3 w h))]
-      (core/parallel-ranges!
-        (* w h)
-        (fn [^long start ^long end]
-          (loop [i start]
-            (when (< i end)
-              (let [x  (- (+ (rem i w) 0.5) (/ (double w) 2.0))
-                    y  (- (+ (quot i w) 0.5) (/ (double h) 2.0))
-                    ;; inverse of: rotate(th) then optional x-flip, then scale z
-                    rx (+ (* x cos-t) (* y sin-t))
-                    ry (- (* y cos-t) (* x sin-t))
-                    rx (if flip? (- rx) rx)
-                    sx (- (+ (/ rx z) (/ iw 2.0)) 0.5)
-                    sy (- (+ (/ ry z) (/ ih 2.0)) 0.5)]
-                (sample-bilinear! src width height sx sy out (* 3 i)))
-              (recur (inc i))))))
-      (scene/image w h out))))
-
-;; ----------------------------------------------------------------- resize
-
-(defn resize-long-edge
-  "Scales `img` so its longest side is `edge` px (never enlarges). Large
-  reductions box-average first (scene/fit), then bilinear to the exact size."
-  [{:keys [^long width ^long height] :as img} edge]
-  (let [long-side (max width height)]
-    (if (or (nil? edge) (<= (long edge) 0) (<= long-side (long edge)))
-      img
-      (let [pre (scene/fit img (* 2 (long edge))) ; at most 2x too big: cheap box pass
-            pw  (long (:width pre))
-            ph  (long (:height pre))
-            s   (/ (double (long edge)) (max pw ph))
-            w   (max 1 (Math/round (* pw s)))
-            h   (max 1 (Math/round (* ph s)))
-            ^floats src (:data pre)
-            ^floats out (float-array (* 3 w h))]
-        (core/parallel-ranges!
-          (* w h)
-          (fn [^long start ^long end]
-            (loop [i start]
-              (when (< i end)
-                (let [sx (- (* (+ (rem i w) 0.5) (/ (double pw) w)) 0.5)
-                      sy (- (* (+ (quot i w) 0.5) (/ (double ph) h)) 0.5)]
-                  (sample-bilinear! src pw ph sx sy out (* 3 i)))
-                (recur (inc i))))))
-        (scene/image w h out)))))

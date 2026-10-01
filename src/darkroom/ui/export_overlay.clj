@@ -3,9 +3,9 @@
   the full-resolution original through the same pipeline as the preview."
   (:require [darkroom.catalog :as cat]
             [darkroom.imaging.color :as color]
-            [darkroom.imaging.develop :as develop]
             [darkroom.imaging.exif :as exif]
             [darkroom.imaging.export :as export]
+            [darkroom.imaging.geometry :as geometry]
             [darkroom.imaging.loader :as loader]
             [darkroom.imaging.pipeline :as pipeline]
             [darkroom.ui.fx :as fx]
@@ -53,7 +53,7 @@
                 (try
                   (let [full (loader/load-scene path)
                         out  (-> (pipeline/render full adj {:quality :final})
-                                 (develop/resize-long-edge (when (pos? size) size)))
+                                 (geometry/resize-long-edge (when (pos? size) size)))
                         name (target-name dir (base-name path) fmt)
                         f    (export/save-scene! out {:dir dir :name name :format fmt :quality (/ q 100.0)
                                                       :space space :tags (exif/read-tags path)})]

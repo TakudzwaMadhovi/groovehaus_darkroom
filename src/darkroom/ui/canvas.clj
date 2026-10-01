@@ -4,6 +4,7 @@
   the views. Slider moves render at :draft quality; 300 ms after the last
   change a :preview pass refines it."
   (:require [darkroom.catalog :as cat]
+            [darkroom.imaging.geometry :as geometry]
             [darkroom.imaging.histogram :as histogram]
             [darkroom.imaging.loader :as loader]
             [darkroom.imaging.pipeline :as pipeline]
@@ -43,6 +44,25 @@
 
 (defn session [path] (get-in @loaded [:frames path]))
 
+(defn frame-aspect
+  "Width / height of the frame (the image after the quarter turns, before any
+  crop) of the loaded frame `path`, or 1.5 if it is not loaded yet."
+  [path rotate]
+  (if-let [{:keys [preview]} (session path)]
+    (let [[w h] (geometry/frame-size (:width preview) (:height preview) rotate)]
+      (/ (double w) (double h)))
+    1.5))
+
+(defn render-settings
+  "The settings the canvas renders for state `s`: the edits, or the original
+  while comparing; while the CROP tab is open the whole frame, so the crop
+  rectangle can be dragged over it."
+  [s path]
+  (let [adj (if (:before s) pipeline/default-settings (cat/adj (:catalog s) path))]
+    (if (and (= :crop (:tab s)) (not (:before s)))
+      (assoc adj :crop nil :aspect "orig")
+      adj)))
+
 (defn create
   "Wires the canvas. `view` is the ImageView to draw into; `on-histogram` gets
   histogram data; `on-loading` gets true/false while a frame is loading.
@@ -55,13 +75,13 @@
                   (let [path (:cur s)]
                     (when-let [sess (and path (session path))]
                       (let [mine     (.incrementAndGet ticket)
-                            settings (if (:before s) pipeline/default-settings (cat/adj (:catalog s) path))
+                            settings (render-settings s path)
                             current? #(and (= mine (.get ticket)) (= path (:cur @st/state)))]
                         (.execute render-worker
                                   (fn []
                                     (when (current?)
                                       (try
-                                        (let [img  (scene/->argb ((:renderer sess) settings {:quality quality}))
+                                        (let [img  (scene/->argb ((:renderer sess) settings {:quality quality :scale (:scale sess)}))
                                               hist (histogram/compute img)
                                               fxi  (fx/->fx-image img)]
                                           (when (current?)
@@ -78,7 +98,8 @@
                                 (try
                                   (let [source  (loader/load-scene path)
                                         preview (scene/fit source (preview-side))]
-                                    (remember! path {:preview preview :renderer (pipeline/renderer preview)})
+                                    (remember! path {:preview preview :renderer (pipeline/renderer preview)
+                                                     :scale (/ (double (:width preview)) (double (:width source)))})
                                     (Platform/runLater
                                       (fn []
                                         (swap! loading disj path)

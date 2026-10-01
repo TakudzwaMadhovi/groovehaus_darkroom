@@ -18,7 +18,8 @@
   control for it in the UI."
   (:require [darkroom.imaging.denoise :as denoise]
             [darkroom.imaging.detail :as detail]
-            [darkroom.imaging.develop :as develop]))
+            [darkroom.imaging.develop :as develop]
+            [darkroom.imaging.geometry :as geometry]))
 
 (def stages
   "Ordered stages. :op is (fn [image settings opts]); :quality? marks stages
@@ -35,9 +36,9 @@
     :op       (fn [img s opts] (detail/reduce-color-noise img s opts))
     :scaled?  true}
    {:id       :geometry
-    :keys     develop/geometry-keys
-    :neutral? develop/geometry-neutral?
-    :op       (fn [img s _] (develop/geometry img s))}
+    :keys     geometry/geometry-keys
+    :neutral? geometry/geometry-neutral?
+    :op       (fn [img s _] (geometry/geometry img s))}
    {:id       :dehaze
     :keys     detail/dehaze-keys
     :neutral? detail/dehaze-neutral?
