@@ -18,8 +18,10 @@ JavaFX natives are picked automatically per OS/arch (see `project.clj`).
 |---|---|
 | `darkroom.imaging.core` | Pure pixel logic: load, `fit` (preview downscale), brightness, contrast, gamma, saturation. No UI imports. |
 | `darkroom.imaging.histogram` | `compute`: per-channel (R, G, B, luma) 256-bin counts. Pure logic. |
+| `darkroom.imaging.export` | `save!`: write JPEG (quality 1–100) or PNG (lossless), atomically. |
 | `darkroom.imaging.pipeline` | Registry mapping settings (`{:brightness 20}`) to operations. |
 | `darkroom.ui.histogram-view` | Canvas that draws histogram data. |
+| `darkroom.ui.export-dialog` | Dialog for folder, file name, format, quality. |
 | `darkroom.ui.view` | JavaFX window and controls. Calls a `render-fn`; knows no image math. |
 | `darkroom.main` | Wires the two together. |
 
@@ -37,3 +39,4 @@ JavaFX natives are picked automatically per OS/arch (see `project.clj`).
 - Per-channel ops use 256-entry lookup tables and split work across cores.
 - `project.clj` sets `-Djava.awt.headless=true` (avoids AWT/JavaFX conflicts on macOS) and `-Xmx2g`. These apply to `lein run`; pass them yourself when running a jar.
 - Double-click a slider to reset it.
+- **Export…** re-renders the full-resolution original with the current slider settings (not the preview) and writes it to the chosen folder. JPEG flattens transparency onto white.
