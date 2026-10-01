@@ -60,7 +60,7 @@
 (audit! "library")
 (on-fx #(st/go! :develop))
 (Thread/sleep 1500)
-(doseq [t [:basic :detail :color :curve :look :crop :local :spots :presets :history :info]]
+(doseq [t [:basic :detail :color :curve :look :crop :local :spots :presets :history :plugins :info]]
   (on-fx #(swap! st/state assoc :tab t)) (Thread/sleep 400)
   (audit! (str "develop/" (name t))))
 (on-fx #(swap! st/state assoc :exporting true))

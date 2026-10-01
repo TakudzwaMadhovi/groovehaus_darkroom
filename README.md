@@ -82,6 +82,28 @@ distortion and fringe sliders. Not implemented: vignetting, the ACM and poly3 TC
 lens-centre offsets, and matching by anything but the EXIF lens name (a lens whose name
 the camera writes differently from the database finds no profile; the toast says so).
 
+### Plugins
+
+Clojure files in the `plugins` folder inside the data folder (next to `catalog.edn`; shown on
+the PLUGINS tab when none are loaded) are loaded when the editor starts. A plugin can register
+**image filters**, which get a slider per parameter on the PLUGINS tab, run after the built-in
+stages on the float scene image, are cached, undoable, copied with settings and skipped at
+their defaults; and **hooks** that run after an export or an import:
+
+```clojure
+(ns my-plugin (:require [darkroom.plugin :as plugin]))
+(plugin/register-filter!
+  {:id :my-look :name "MY LOOK"
+   :params [{:key :amount :label "AMOUNT" :min 0 :max 1 :default 0.0}]
+   :run (fn [img {:keys [amount]} opts] img)})        ; img {:width :height :data floats}, linear, may exceed 1
+(plugin/on! :after-export (fn [{:keys [file]}] (println "exported" (str file))))
+```
+
+`examples/plugins/warm_glow.clj` is a complete example. A plugin is ordinary code run with the
+app's full privileges: only install files you trust. Nothing is downloaded or loaded from
+anywhere else. A plugin that fails to load, throws while rendering, or whose hook throws is
+reported and skipped; it cannot stop the editor or other plugins.
+
 ### HDR merge and panoramas
 
 Select two or more frames in the Library and use `HDR MERGE` or `PANORAMA` (right-hand panel).
@@ -180,6 +202,7 @@ by path, modification time and size.
 | `darkroom.imaging.histogram` / `export` / `browser` | Histogram, JPEG / PNG / 16-bit TIFF / WebP writers (ICC, EXIF), folder scan + thumbnails |
 | `darkroom.imaging.output` | File-name templates, output sharpening, watermark, metadata modes, rendering one or many frames to disk |
 | `darkroom.catalog` | Pure library model: shoots, frames, ratings, reject flags, colour labels, keywords, notes, adjustments, undo / redo history, snapshots, user presets, virtual copies, copy / paste, search and sort; EDN persistence |
+| `darkroom.plugin` | Plugin registry, loader and hooks (image filters appear as the pipeline's last stage and the PLUGINS tab) |
 | `darkroom.imaging.merge` / `panorama` / `combine` | HDR bracket merge, panorama stitching in linear light, and saving the result as a float TIFF frame |
 | `darkroom.imaging.dcp` / `camera` | DNG camera profile (.dcp) reader; camera RGB → XYZ → working space with the profile's matrices, hue/sat/val table, look table and tone curve |
 | `darkroom.imaging.lens` / `watch` | lensfun profile lookup, interpolation and rescaling; hot-folder watcher |

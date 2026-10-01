@@ -3,6 +3,7 @@
   shortcuts. Watches `state/state` and updates whichever parts changed."
   (:require [darkroom.catalog :as cat]
             [darkroom.imaging.browser :as browser]
+            [darkroom.plugin :as plugin]
             [darkroom.ui.canvas :as canvas]
             [darkroom.ui.develop :as develop-view]
             [darkroom.ui.export-overlay :as export-overlay]
@@ -202,14 +203,16 @@
   "Starts the toolkit if needed and shows the main window."
   [{:keys [file]}]
   (let [open! (fn []
-                (let [scene (build-scene)
+                (let [_     (plugin/load-dir! (plugin/plugin-dir (cat/app-dir)))
+                      scene (build-scene)
                       stage (doto (Stage.) (.setTitle "Groovehaus Darkroom") (.setScene scene)
                               (.setMinWidth 900) (.setMinHeight 620))]
                   (.setOnCloseRequest stage (w/handler (fn [_] (st/save-now!))))
                   (st/load-catalog!)
                   (when file (st/open-file! file))
                   (.show stage)
-                  ))]
+                  (when-let [{plugin-file :file message :message} (first (plugin/errors))]
+                    (st/toast! (str "PLUGIN " (.toUpperCase ^String plugin-file) " FAILED — " (.toUpperCase ^String message))))))]
     (try
       (Platform/startup ^Runnable open!)
       (catch IllegalStateException _ (Platform/runLater open!)))))

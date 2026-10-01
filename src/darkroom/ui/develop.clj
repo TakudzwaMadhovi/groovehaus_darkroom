@@ -11,6 +11,7 @@
             [darkroom.imaging.develop :as develop]
             [darkroom.imaging.geometry :as geometry]
             [darkroom.imaging.pipeline :as pipeline]
+            [darkroom.plugin :as plugin]
             [darkroom.ui.canvas :as canvas]
             [darkroom.ui.crop-overlay :as crop-overlay]
             [darkroom.ui.curve :as curve]
@@ -70,7 +71,7 @@
 
 (def ^:private tab-labels
   [[:basic "BASIC"] [:detail "DETAIL"] [:color "COLOR"] [:curve "CURVE"] [:look "LOOK"] [:crop "CROP"]
-   [:local "LOCAL"] [:spots "SPOTS"] [:presets "PRESETS"] [:history "HISTORY"] [:info "INFO"]])
+   [:local "LOCAL"] [:spots "SPOTS"] [:presets "PRESETS"] [:history "HISTORY"] [:plugins "PLUGINS"] [:info "INFO"]])
 
 (def ^:private whole-number-keys
   "Settings whose sliders step in whole numbers and are stored as integers."
@@ -574,6 +575,31 @@
                         (w/a11y! b (str "Step " (inc i) ", " label (cond cur? ", current" redo? ", undone, restore" :else ", revert to this step")))
                         (w/add! col b))))))))}))
 
+(defn- plugins-body
+  "One group of sliders per filter registered by a plugin (see darkroom.plugin)."
+  []
+  (let [specs (plugin/filters-list)
+        rows (vec (for [spec specs
+                        {:keys [key label min max step default] :as prm} (:params spec)]
+                    (let [id (:id spec)
+                          put! (fn [v] (st/set-adj! :plugins (assoc-in (:plugins (st/cur-adj @st/state)) [id key] v)))
+                          row (w/slider-row {:label (str (:name spec) " · " label) :min min :max max :step step :default default
+                                             :value (double default) :decimals (if (>= (double step) 1.0) 0 2)
+                                             :on-input put!
+                                             :on-commit (fn [] (st/commit! (str "PLUGIN " (:name spec) " " label)))
+                                             :on-reset (fn [] (put! default) (st/commit! (str "PLUGIN " (:name spec) " " label " RESET")))})]
+                      (assoc row :id id :param key :default default))))]
+    {:node (if (empty? specs)
+             (w/vbox 12
+                     (w/label "no plugins loaded." "editorial")
+                     (doto (w/label "put a .clj file that calls plugin/register-filter! in the plugins folder next to the catalog, then restart. see the README." "editorial")
+                       (.setWrapText true) (.setStyle "-fx-font-size: 16px;"))
+                     (w/tlabel (str (plugin/plugin-dir (cat/app-dir))) :normal "sys-10" "faint"))
+             (apply w/vbox 18 (map :node rows)))
+     :sync! (fn [adj]
+              (doseq [{:keys [id param default set-value!]} rows]
+                (set-value! (double (get-in adj [:plugins id param] default)))))}))
+
 (defn- info-body []
   (let [panel (info/create)]
     {:node (:node panel) :sync! (fn [_] ((:sync! panel) @st/state))}))
@@ -699,6 +725,7 @@
     :curve   (curve-body)
     :presets (presets-body)
     :history (history-body)
+    :plugins (plugins-body)
     :info    (info-body)))
 
 ;; ---------------------------------------------------------------- filmstrip

@@ -26,7 +26,8 @@
             [darkroom.imaging.develop :as develop]
             [darkroom.imaging.geometry :as geometry]
             [darkroom.imaging.heal :as heal]
-            [darkroom.imaging.local :as local]))
+            [darkroom.imaging.local :as local]
+            [darkroom.plugin :as plugin]))
 
 (def stages
   "Ordered stages. :op is (fn [image settings opts]); :quality? marks stages
@@ -67,6 +68,12 @@
     :keys     [:local]
     :neutral? local/local-neutral?
     :op       (fn [img s opts] (local/apply-local img s opts))
+    :scaled?  true}
+   ;; image filters registered by plugins (see darkroom.plugin)
+   {:id       :plugins
+    :keys     [:plugins]
+    :neutral? plugin/settings-neutral?
+    :op       (fn [img s opts] (plugin/apply-filters img s opts))
     :scaled?  true}])
 
 (def source-keys
@@ -78,7 +85,7 @@
 (def default-settings
   "Neutral value for every setting."
   (merge develop/defaults detail/defaults heal/defaults local/defaults {:denoise 0}
-         {:camera-profile nil :camera-profile-curve false}))
+         {:camera-profile nil :camera-profile-curve false :plugins {}}))
 
 (defn- full [settings] (merge default-settings settings))
 

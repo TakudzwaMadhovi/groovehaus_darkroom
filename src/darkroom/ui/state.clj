@@ -37,7 +37,8 @@
             [darkroom.imaging.mask :as mask]
             [darkroom.imaging.paths :as paths]
             [darkroom.imaging.watch :as watch]
-            [darkroom.imaging.xmp :as xmp])
+            [darkroom.imaging.xmp :as xmp]
+            [darkroom.plugin :as plugin])
   (:import (java.io File)
            (javafx.application Platform)
            (java.util.concurrent Executors ScheduledExecutorService ScheduledFuture ThreadFactory TimeUnit)))
@@ -284,6 +285,7 @@
           (when (seq new)
             (swap! state (fn [st] (cond-> (assoc st :cur (if keep-view? (last new) (first new)))
                                     (not keep-view?) (assoc :view :library)))))
+          (when (seq new) (plugin/run-hooks! :after-import {:paths new}))
           (count new))))))
 
 (defn rate!

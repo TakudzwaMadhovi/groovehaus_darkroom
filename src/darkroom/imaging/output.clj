@@ -16,7 +16,8 @@
             [darkroom.imaging.export :as export]
             [darkroom.imaging.geometry :as geometry]
             [darkroom.imaging.loader :as loader]
-            [darkroom.imaging.pipeline :as pipeline])
+            [darkroom.imaging.pipeline :as pipeline]
+            [darkroom.plugin :as plugin])
   (:import (java.awt Color Font RenderingHints)
            (java.awt.image BufferedImage)
            (java.io File)
@@ -174,8 +175,10 @@
                                          :date (capture-date tags) :rating rating :shoot shoot})
         name  (free-name dir base format)
         out   (render-frame path adj o)]
-    (export/save-scene! out {:dir dir :name name :format format :quality quality :space space
-                             :tags (export-tags metadata tags (:meta frame))})))
+    (let [file (export/save-scene! out {:dir dir :name name :format format :quality quality :space space
+                                        :tags (export-tags metadata tags (:meta frame))})]
+      (plugin/run-hooks! :after-export {:file file :frame frame})
+      file)))
 
 (defn export-frames!
   "Exports each frame in order, numbering them 1.. for {n}. `progress` is called

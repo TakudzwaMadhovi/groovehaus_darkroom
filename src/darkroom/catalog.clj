@@ -331,12 +331,13 @@
    :detail  [:texture :clarity :dehaze :sharpen :sharpen-radius :sharpen-masking :denoise :denoise-color]
    :curve   [:curve :curve-r :curve-g :curve-b]
    :effects [:fade :bw :grain :vignette]
+   :plugins [:plugins]
    :geometry (vec geometry/geometry-keys)
    :retouch [:spots :local]
    ;; how the RAW file is decoded; camera-specific, so not copied by default
    :profile [:camera-profile :camera-profile-curve]})
 
-(def default-copy-groups [:tone :color :detail :curve :effects])
+(def default-copy-groups [:tone :color :detail :curve :effects :plugins])
 
 (defn copy-settings
   "The frame's settings in the chosen groups (default: everything that is not

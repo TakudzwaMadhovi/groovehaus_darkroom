@@ -43,8 +43,8 @@
     (is (identical? src (pipeline/render src {:local [] :spots []})))
     (let [out (pipeline/render src {:local [layer]})]
       (is (< (Math/abs (- 0.4 (aget ^floats (:data out) 0))) 0.01)))
-    (testing "stage order: spots after geometry, local last"
-      (is (= [:denoise :color-nr :geometry :spots :dehaze :tone :detail :local] (map :id pipeline/stages))))
+    (testing "stage order: spots after geometry, plugins (registered filters) last"
+      (is (= [:denoise :color-nr :geometry :spots :dehaze :tone :detail :local :plugins] (map :id pipeline/stages))))
     (testing "spot coordinates refer to the cropped picture"
       (let [img (scene/image 100 50 (float-array (for [_ (range 50) x (range 100) _ (range 3)] (if (< x 50) 0.2 0.8))))
             out (pipeline/render img {:crop [0.5 0.0 0.5 1.0]
