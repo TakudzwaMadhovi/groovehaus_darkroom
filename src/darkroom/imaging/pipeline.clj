@@ -5,10 +5,15 @@
 
     1. denoise   (OpenCV non-local means; slow, so it runs first and is cached)
     2. color-nr  (chroma noise)
-    3. geometry  (aspect crop, straighten, flip)
-    4. dehaze
-    5. tone      (exposure ... grain; see darkroom.imaging.develop)
-    6. detail    (texture, clarity, sharpening; see darkroom.imaging.detail)
+    3. geometry  (crop, straighten, turns, flips, perspective, lens)
+    4. spots     (clone / heal; see darkroom.imaging.heal)
+    5. dehaze
+    6. tone      (exposure ... grain; see darkroom.imaging.develop)
+    7. detail    (texture, clarity, sharpening; see darkroom.imaging.detail)
+    8. local     (masked adjustment layers; see darkroom.imaging.local)
+
+  Spots and local masks are positioned on the geometry stage's output (the
+  cropped, turned picture), as fractions of it.
 
   Stages receive `opts`: :quality (:draft/:preview/:final) and :scale (preview
   width / source width, so pixel-sized radii look the same in a downscaled preview).
@@ -19,7 +24,9 @@
   (:require [darkroom.imaging.denoise :as denoise]
             [darkroom.imaging.detail :as detail]
             [darkroom.imaging.develop :as develop]
-            [darkroom.imaging.geometry :as geometry]))
+            [darkroom.imaging.geometry :as geometry]
+            [darkroom.imaging.heal :as heal]
+            [darkroom.imaging.local :as local]))
 
 (def stages
   "Ordered stages. :op is (fn [image settings opts]); :quality? marks stages
@@ -39,6 +46,10 @@
     :keys     geometry/geometry-keys
     :neutral? geometry/geometry-neutral?
     :op       (fn [img s _] (geometry/geometry img s))}
+   {:id       :spots
+    :keys     [:spots]
+    :neutral? heal/spots-neutral?
+    :op       (fn [img s _] (heal/apply-spots img s))}
    {:id       :dehaze
     :keys     detail/dehaze-keys
     :neutral? detail/dehaze-neutral?
@@ -51,11 +62,16 @@
     :keys     detail/detail-keys
     :neutral? detail/detail-neutral?
     :op       (fn [img s opts] (detail/local-contrast img s opts))
+    :scaled?  true}
+   {:id       :local
+    :keys     [:local]
+    :neutral? local/local-neutral?
+    :op       (fn [img s opts] (local/apply-local img s opts))
     :scaled?  true}])
 
 (def default-settings
   "Neutral value for every setting."
-  (merge develop/defaults detail/defaults {:denoise 0}))
+  (merge develop/defaults detail/defaults heal/defaults local/defaults {:denoise 0}))
 
 (defn- full [settings] (merge default-settings settings))
 

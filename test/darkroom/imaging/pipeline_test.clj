@@ -1,5 +1,5 @@
 (ns darkroom.imaging.pipeline-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is testing]]
             [darkroom.imaging.pipeline :as pipeline]
             [darkroom.imaging.scene :as scene]))
 
@@ -36,3 +36,19 @@
       (is (> (aget ^floats (:data tone) 0) 0.3) "tone has applied the exposure")
       (is (identical? src (pipeline/cached-image r :denoise)) "a skipped stage hands its input through"))
     (is (nil? (pipeline/cached-image (fn [& _] nil) :geometry)) "not a pipeline renderer")))
+
+(deftest spots-and-local-layers-run-in-the-pipeline
+  (let [src (scene/image 40 40 (float-array (repeat (* 3 40 40) 0.2)))
+        layer {:id 1 :type :range :visible true :amount 1.0 :adj {:exposure 1.0}}]
+    (is (identical? src (pipeline/render src {:local [] :spots []})))
+    (let [out (pipeline/render src {:local [layer]})]
+      (is (< (Math/abs (- 0.4 (aget ^floats (:data out) 0))) 0.01)))
+    (testing "stage order: spots after geometry, local last"
+      (is (= [:denoise :color-nr :geometry :spots :dehaze :tone :detail :local] (map :id pipeline/stages))))
+    (testing "spot coordinates refer to the cropped picture"
+      (let [img (scene/image 100 50 (float-array (for [_ (range 50) x (range 100) _ (range 3)] (if (< x 50) 0.2 0.8))))
+            out (pipeline/render img {:crop [0.5 0.0 0.5 1.0]
+                                      :spots [{:x 0.5 :y 0.5 :r 0.1 :mode :clone :sx 0.5 :sy 0.2 :opacity 1.0}]})]
+        (is (= [50 50] [(:width out) (:height out)]))
+        (is (every? #(< (Math/abs (- 0.8 %)) 1e-3) (take 3 (:data out))))))
+    (doseq [k [:local :spots]] (is (contains? pipeline/default-settings k)))))
