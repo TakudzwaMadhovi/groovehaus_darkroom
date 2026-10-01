@@ -273,6 +273,7 @@
                    :radial  "DRAG THE CENTRE OR SIDE HANDLES"
                    :brush   "PAINT ON THE PHOTO"
                    :subject "DRAG A BOX AROUND THE SUBJECT"
+                   :subject-ai "SELECTED BY A NEURAL NETWORK; REFINE WITH AMOUNT, FEATHER AND INVERT"
                    :sky     "SELECTED FROM COLOUR AND BRIGHTNESS (APPROXIMATE)"
                    :range   "AFFECTS THE WHOLE PHOTO, LIMITED BY THE RANGES BELOW"
                    "")
@@ -317,10 +318,18 @@
         editor (w/vbox 0)
         sig    (atom nil)
         cur-editor (atom nil)]
-    (doseq [t [:linear :radial :brush :range :subject :sky]]
+    (doseq [t [:linear :radial :brush :range :subject :subject-ai :sky]]
       (.add (.getChildren adders)
-            (doto (w/pill (str "+ " (clojure.string/upper-case (name t))) (fn [] (st/add-layer! t)) "sm")
+            (doto (w/pill (if (= t :subject-ai) "+ AI SUBJECT" (str "+ " (clojure.string/upper-case (name t)))) (fn [] (st/add-layer! t)) "sm")
               (w/set-base-a11y! (str "Add " (local/type-labels t))))))
+    (.add (.getChildren adders)
+          (doto (w/pill "AI MODEL…" (fn []
+                                      (let [ch (doto (javafx.stage.FileChooser.) (.setTitle "Subject segmentation model (U²-Net ONNX)"))]
+                                        (.add (.getExtensionFilters ch) (javafx.stage.FileChooser$ExtensionFilter. "ONNX model" ["*.onnx"]))
+                                        (when-let [f (.showOpenDialog ch (first (javafx.stage.Window/getWindows)))]
+                                          (when (st/set-segment-model! f) (st/toast! "AI MODEL READY")))))
+                        "sm")
+            (w/set-base-a11y! "Choose the AI subject model file")))
     (w/add! root (w/tlabel "ADD A MASK" :wide "sys" "dim") adders (w/tlabel "MASKS" :wide "sys" "dim") list-box editor)
     {:node root
      :sync! (fn [adj]

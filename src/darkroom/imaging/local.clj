@@ -1,6 +1,6 @@
 (ns darkroom.imaging.local
   "Local adjustments: a list of layers, each a mask (linear or radial gradient,
-  brush, range, subject or sky; optionally limited by a luminance and/or colour
+  brush, range, subject (a box, or a neural network) or sky; optionally limited by a luminance and/or colour
   range, inverted and feathered) with its own tone and detail adjustments.
   Each layer's adjusted copy of the picture is blended in through its mask.
   Layers apply in order on the picture as edited so far, so range masks see
@@ -69,7 +69,7 @@
         m)))
 
 (defn- scene-dependent? [{:keys [type range]}]
-  (boolean (or (#{:range :subject :sky} type) (seq range))))
+  (boolean (or (#{:range :subject :subject-ai :sky} type) (seq range))))
 
 (defn- base-mask ^floats [{:keys [width height] :as img} {:keys [type shape]}]
   (let [w (long width) h (long height)]
@@ -78,6 +78,10 @@
       :radial  (mask/radial w h shape)
       :brush   (mask/brush w h (:strokes shape))
       :subject (mask/subject img shape)
+      :subject-ai (try (mask/subject-ai img shape)
+                       (catch Throwable t
+                         (binding [*out* *err*] (println "AI subject mask unavailable:" (.getMessage t)))
+                         (float-array (* w h))))
       :sky     (mask/sky img shape)
       :range   (mask/ones w h))))
 
@@ -147,7 +151,7 @@
 
 (def type-labels
   {:linear "LINEAR GRADIENT" :radial "RADIAL GRADIENT" :brush "BRUSH" :range "RANGE"
-   :subject "SUBJECT" :sky "SKY"})
+   :subject "SUBJECT" :subject-ai "AI SUBJECT" :sky "SKY"})
 
 (defn next-id
   "An id not used by any of `layers`."
@@ -155,14 +159,16 @@
   (inc (long (reduce max 0 (map :id layers)))))
 
 (defn new-layer
-  "A fresh layer of `type` with sensible starting geometry and no adjustments."
-  [type id]
+  "A fresh layer of `type` with sensible starting geometry and no adjustments.
+  `opts` {:model path} names the network an :subject-ai layer runs."
+  [type id & [{:keys [model]}]]
   {:id id :type type :visible true :amount 1.0 :invert false :feather 0.0 :adj {}
    :shape (case type
             :linear  {:x0 0.5 :y0 0.2 :x1 0.5 :y1 0.6}
             :radial  {:cx 0.5 :cy 0.5 :rx 0.3 :ry 0.25 :feather 0.5}
             :brush   {:strokes []}
             :subject {:rect [0.25 0.2 0.5 0.6]}
+            :subject-ai {:model model}
             {})
    :range (when (= type :range) {:luma {:lo 0.5 :hi 1.0 :smooth 0.1}})})
 

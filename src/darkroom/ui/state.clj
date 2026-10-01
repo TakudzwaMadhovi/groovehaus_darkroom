@@ -33,6 +33,7 @@
             [darkroom.imaging.exif :as exif]
             [darkroom.imaging.lens :as lens]
             [darkroom.imaging.local :as local]
+            [darkroom.imaging.mask :as mask]
             [darkroom.imaging.watch :as watch]
             [darkroom.imaging.xmp :as xmp])
   (:import (java.io File)
@@ -359,13 +360,31 @@
 
 (defn select-layer! [id] (swap! state assoc :local-sel id))
 
+(defn segment-model
+  "Path of the ONNX subject-segmentation model the catalog remembers, or nil."
+  []
+  (:segment-model (:catalog @state)))
+
+(defn set-segment-model!
+  "Remembers the ONNX model at `file` for AI subject masks, after checking that
+  OpenCV can load it. Returns true, or false after saying why not."
+  [^File file]
+  (try (mask/check-model! (.getPath file))
+       (update-catalog! assoc :segment-model (.getPath file))
+       true
+       (catch Throwable t (toast! (str "CANNOT USE THAT MODEL — " (.getMessage t))) false)))
+
 (defn add-layer!
-  "Adds a new local-adjustment layer of `type` and selects it."
+  "Adds a new local-adjustment layer of `type` and selects it. An AI subject
+  layer needs a segmentation model (see set-segment-model!); without one nothing
+  is added and the toast says so."
   [type]
-  (let [ls (layers) id (local/next-id ls)]
-    (set-adj! :local (conj ls (local/new-layer type id)))
-    (select-layer! id)
-    (commit! (str "ADD " (local/type-labels type)))))
+  (if (and (= type :subject-ai) (not (segment-model)))
+    (toast! "CHOOSE AN AI MODEL FIRST (U²-NET .ONNX)")
+    (let [ls (layers) id (local/next-id ls)]
+      (set-adj! :local (conj ls (local/new-layer type id {:model (segment-model)})))
+      (select-layer! id)
+      (commit! (str "ADD " (local/type-labels type))))))
 
 (defn update-layer!
   "Live change of layer `id` (no history entry until `commit!`): f maps the

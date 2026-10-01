@@ -374,3 +374,19 @@
     (is (= ["Other"] (mapv :name (st/camera-profiles))))
     (st/remove-camera-profile! (.getPath b))
     (is (nil? (st/auto-camera-profile!)) "nothing to match")))
+
+(deftest ai-subject-layer-needs-a-working-model
+  (shoot-with "a.png")
+  (st/add-layer! :subject-ai)
+  (is (empty? (st/layers)) "no model chosen: nothing added")
+  (let [bad (java.io.File/createTempFile "bad" ".onnx")]
+    (spit bad "nope")
+    (is (false? (st/set-segment-model! bad)))
+    (is (nil? (st/segment-model)) "a model that cannot load is not remembered"))
+  (let [model (System/getenv "GROOVEHAUS_TEST_ONNX")]
+    (if-not (and model (.isFile (java.io.File. ^String model)))
+      (println "  (skipped: GROOVEHAUS_TEST_ONNX not set)")
+      (do (is (true? (st/set-segment-model! (java.io.File. ^String model))))
+          (st/add-layer! :subject-ai)
+          (is (= [:subject-ai] (mapv :type (st/layers))))
+          (is (= model (get-in (first (st/layers)) [:shape :model])))))))

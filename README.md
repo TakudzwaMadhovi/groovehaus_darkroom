@@ -213,6 +213,14 @@ Alpha is not carried: images are treated as opaque photographs.
   colour + brightness + smoothness connected to the top edge), not trained models. They
   work on clear subjects against distinct backgrounds and open skies; they do not
   recognise people, hair or busy cloudscapes the way a neural network does.
+- **AI subject** (`+ AI SUBJECT`, LOCAL tab) runs a salient-object network instead: choose a
+  U²-Net or U²-Net-small ONNX file with `AI MODEL…` (for example `u2netp.onnx` from the
+  rembg project; not bundled). The picture is squeezed to 320 x 320, the network's fused
+  saliency map is scaled back up and feathered, then Amount / Feather / Invert and the
+  range limits refine it. Tried on real photographs (a person with a helmet, a cat, a cup
+  on a table): it follows the outline of the main object, not people specifically, so a
+  busy scene or several equal subjects can select the wrong thing. It runs on the CPU
+  through OpenCV's DNN module, about 0.3–0.9 s on a laptop-class core.
 - **Heal** copies a nearby patch (chosen automatically) and blends its edge mismatch
   smoothly; it cannot invent detail, so it is for dust and small blemishes, not for
   removing large objects.

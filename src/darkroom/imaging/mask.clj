@@ -4,15 +4,17 @@
   come from coordinates given as fractions of the image; range masks
   (luminance, colour) are read from the picture; subject and sky selections are
   classical image-analysis approximations (GrabCut from a rectangle; colour,
-  brightness and smoothness connected to the top edge), not trained models.
-  Pure logic (OpenCV for GrabCut), no UI dependency."
+  brightness and smoothness connected to the top edge), unless a salient-object
+  network (U2-Net style, ONNX) is supplied: `subject-ai`. Pure logic (OpenCV for
+  GrabCut and the network), no UI dependency."
   (:require [darkroom.imaging.color :as color]
             [darkroom.imaging.core :as core]
             [darkroom.imaging.detail :as detail]
             [darkroom.imaging.scene :as scene])
-  (:import (org.bytedeco.javacpp BytePointer)
-           (org.bytedeco.opencv.global opencv_core opencv_imgproc)
-           (org.bytedeco.opencv.opencv_core Mat Rect)))
+  (:import (org.bytedeco.javacpp BytePointer FloatPointer IntPointer)
+           (org.bytedeco.opencv.global opencv_core opencv_dnn opencv_imgproc)
+           (org.bytedeco.opencv.opencv_core Mat MatVector Rect Size StringVector)
+           (org.bytedeco.opencv.opencv_dnn Net)))
 
 (set! *unchecked-math* :warn-on-boxed)
 
@@ -230,6 +232,93 @@
               (aset p i (float (if (or (== v opencv_imgproc/GC_FGD) (== v opencv_imgproc/GC_PR_FGD)) 1.0 0.0)))))
           (feathered p sw sh width height 0.004))
         (finally (.close img8) (.close m) (.close bgd) (.close fgd))))))
+
+;; ------------------------------------------------ subject by neural network
+
+(def ^:private ^:const net-side 320)
+
+(defonce ^:private nets (atom {}))
+
+(defn- net-for
+  "The loaded network for the ONNX file at `path` (kept until the file changes).
+  Throws ex-info when the file is missing or OpenCV cannot read it as a network."
+  ^Net [path]
+  (let [f (java.io.File. (str path))
+        k [(.getPath f) (.lastModified f)]]
+    (or (get @nets k)
+        (do (when-not (.isFile f) (throw (ex-info "Segmentation model not found" {:path (str path)})))
+            (let [^Net n (try (opencv_dnn/readNetFromONNX (.getPath f))
+                              (catch Throwable t (throw (ex-info (str "Not a usable ONNX model: " (.getMessage t)) {:path (str path)}))))]
+              (when (.empty n) (throw (ex-info "Not a usable ONNX model" {:path (str path)})))
+              (reset! nets {k n})
+              n)))))
+
+(defn check-model!
+  "Loads the model at `path` (so a bad file is reported when it is chosen, not
+  when it is first used). Returns the path."
+  [path]
+  (net-for path)
+  path)
+
+(def ^:private imagenet-mean [0.485 0.456 0.406])
+(def ^:private imagenet-std [0.229 0.224 0.225])
+
+(defn- network-input
+  "Float NCHW [1 3 320 320] input for a U2-Net style network from `small` (scene
+  image): converted to sRGB, squeezed to 320 x 320 (as the network was trained),
+  scaled by its maximum and normalised with the ImageNet mean and deviation."
+  ^floats [small]
+  (let [sw (long (:width small)) sh (long (:height small))
+        ^doubles m (double-array (color/convert-matrix :working :srgb))
+        ^floats d (:data small)
+        n (* sw sh)
+        ^floats rgb (float-array (* 3 n))]
+    (dotimes [i n]
+      (let [j (* 3 i) r (double (aget d j)) g (double (aget d (+ j 1))) b (double (aget d (+ j 2)))
+            enc (fn ^double [^double v] (max 0.0 (min 1.0 (scene/srgb-encode-extended v))))]
+        (aset rgb j (float (enc (+ (* (aget m 0) r) (* (aget m 1) g) (* (aget m 2) b)))))
+        (aset rgb (+ j 1) (float (enc (+ (* (aget m 3) r) (* (aget m 4) g) (* (aget m 5) b)))))
+        (aset rgb (+ j 2) (float (enc (+ (* (aget m 6) r) (* (aget m 7) g) (* (aget m 8) b)))))))
+    (let [^Mat src (Mat. (int sh) (int sw) opencv_core/CV_32FC3) ^Mat dst (Mat.)]
+      (try
+        (.put (FloatPointer. (.data src)) rgb)
+        (opencv_imgproc/resize src dst (Size. (int net-side) (int net-side)) 0.0 0.0 opencv_imgproc/INTER_AREA)
+        (let [np (* net-side net-side) ^floats px (float-array (* 3 np)) ^floats out (float-array (* 3 np))]
+          (.get (FloatPointer. (.data dst)) px)
+          (let [mx (Math/max 1e-6 (double (loop [i 0 a 0.0] (if (< i (* 3 np)) (recur (inc i) (Math/max a (double (aget px i)))) a))))]
+            (dotimes [i np]
+              (dotimes [c 3]
+                (aset out (+ (* c np) i)
+                      (float (/ (- (/ (double (aget px (+ (* 3 i) c))) mx) (double (imagenet-mean c))) (double (imagenet-std c))))))))
+          out)
+        (finally (.close src) (.close dst))))))
+
+(defn subject-ai
+  "Selects the subject with a salient-object network: the ONNX model at
+  (:model shape), a U2-Net / U2-Net-small style network (input 320 x 320 RGB,
+  first output the fused saliency map). Runs on a reduced copy; the soft result
+  is scaled up to the image and feathered. Serialised: the network object is shared."
+  ^floats [{:keys [^long width ^long height] :as img} {:keys [model]}]
+  (let [^Net net (net-for model)
+        small (small-copy img)
+        ^floats in (network-input small)
+        np (* net-side net-side)]
+    (locking net
+      (let [^Mat blob (Mat. (IntPointer. (int-array [1 3 net-side net-side])) opencv_core/CV_32F (FloatPointer. in))
+            names (.getUnconnectedOutLayersNames net)
+            outs (MatVector.)]
+        (try
+          (.setInput net blob)
+          (.forward net outs names)
+          (let [^Mat o (.get outs 0) ^floats p (float-array np)]
+            (when (not= np (.total o)) (throw (ex-info "Unexpected network output size" {:total (.total o)})))
+            (.get (.asFloatBuffer (.asByteBuffer (.capacity (.data o) (* 4 np)))) p)
+            (let [lo (double (loop [i 0 a 1.0] (if (< i np) (recur (inc i) (Math/min a (double (aget p i)))) a)))
+                  hi (double (loop [i 0 a 0.0] (if (< i np) (recur (inc i) (Math/max a (double (aget p i)))) a)))
+                  span (Math/max 1e-6 (- hi lo))]
+              (dotimes [i np] (aset p i (float (/ (- (double (aget p i)) lo) span))))
+              (feathered p net-side net-side width height 0.003)))
+          (finally (.close blob)))))))
 
 (defn- enc-at
   "Encoded value of channel c of pixel i in float RGB `d`."
