@@ -1,6 +1,7 @@
 (ns darkroom.main
   "Entry point: wires the image logic to the UI."
   (:require [darkroom.imaging.core :as core]
+            [darkroom.imaging.histogram :as histogram]
             [darkroom.imaging.pipeline :as pipeline]
             [darkroom.ui.view :as view])
   (:gen-class))
@@ -15,4 +16,6 @@
 (defn -main [& [path]]
   (let [source  (core/load-image (or path default-image-path))
         preview (core/fit source preview-max-side)]
-    (view/show! preview #(pipeline/render preview (merge pipeline/default-settings %)))))
+    (view/show! preview
+                #(pipeline/render preview (merge pipeline/default-settings %))
+                histogram/compute)))

@@ -17,7 +17,9 @@ JavaFX natives are picked automatically per OS/arch (see `project.clj`).
 | Namespace | Role |
 |---|---|
 | `darkroom.imaging.core` | Pure pixel logic: load, `fit` (preview downscale), brightness, contrast, gamma, saturation. No UI imports. |
+| `darkroom.imaging.histogram` | `compute`: per-channel (R, G, B, luma) 256-bin counts. Pure logic. |
 | `darkroom.imaging.pipeline` | Registry mapping settings (`{:brightness 20}`) to operations. |
+| `darkroom.ui.histogram-view` | Canvas that draws histogram data. |
 | `darkroom.ui.view` | JavaFX window and controls. Calls a `render-fn`; knows no image math. |
 | `darkroom.main` | Wires the two together. |
 

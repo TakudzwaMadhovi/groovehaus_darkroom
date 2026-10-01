@@ -1,6 +1,8 @@
 (ns darkroom.ui.view
   "JavaFX user interface. Knows nothing about how pixels are processed: it only
-  hands settings to a `render-fn` and displays whatever image comes back."
+  hands settings to a `render-fn`, displays whatever image comes back, and
+  hands that image to an `analyze-fn` whose result feeds the histogram panel."
+  (:require [darkroom.ui.histogram-view :as histogram-view])
   (:import (java.util.concurrent ExecutorService Executors ThreadFactory)
            (java.util.concurrent.atomic AtomicLong)
            (javafx.application Platform)
@@ -29,10 +31,10 @@
       (newThread [_ r] (doto (Thread. ^Runnable r "darkroom-render") (.setDaemon true))))))
 
 (defn- latest-wins-renderer
-  "Returns (fn [settings]) that renders on the worker thread and shows the
-  result on the FX thread. If newer requests arrive while one is queued or
-  running, stale ones are dropped, so fast slider drags never pile up."
-  [^ImageView view render-fn]
+  "Returns (fn [settings]) that renders and analyzes on the worker thread and
+  shows the result on the FX thread. If newer requests arrive while one is
+  queued or running, stale ones are dropped, so fast slider drags never pile up."
+  [^ImageView view render-fn analyze-fn on-analysis]
   (let [ticket (AtomicLong.)]
     (fn [settings]
       (let [mine (.incrementAndGet ticket)
@@ -41,9 +43,13 @@
                   (fn []
                     (when (current?)
                       (try
-                        (let [fx-img (->fx-image (render-fn settings))]
+                        (let [img      (render-fn settings)
+                              analysis (analyze-fn img)
+                              fx-img   (->fx-image img)]
                           (when (current?)
-                            (Platform/runLater #(when (current?) (.setImage view fx-img)))))
+                            (Platform/runLater #(when (current?)
+                                                  (.setImage view fx-img)
+                                                  (on-analysis analysis)))))
                         (catch Throwable t (.printStackTrace t))))))))))
 
 (def controls
@@ -87,13 +93,14 @@
     (.add grid shown 2 row)))
 
 (defn- build-scene
-  [source render-fn]
+  [source render-fn analyze-fn]
   (let [view     (doto (ImageView. (->fx-image source))
                    (.setPreserveRatio true)
                    (.setSmooth true))
         center   (doto (BorderPane. view) (.setPadding (Insets. 10)))
         settings (atom (into {} (map (juxt :key :value)) controls))
-        render!  (latest-wins-renderer view render-fn)
+        hist     (histogram-view/create)
+        render!  (latest-wins-renderer view render-fn analyze-fn (:update! hist))
         grid     (doto (GridPane.)
                    (.setHgap 10) (.setVgap 4) (.setPadding (Insets. 10)))]
     (doseq [^ColumnConstraints cc [(ColumnConstraints.)
@@ -106,17 +113,23 @@
     ;; Keep the image scaled to the window.
     (.bind (.fitWidthProperty view) (.subtract (.widthProperty center) 20))
     (.bind (.fitHeightProperty view) (.subtract (.heightProperty center) 20))
-    (Scene. (doto (BorderPane.) (.setCenter center) (.setBottom grid)) 900 800)))
+    ((:update! hist) (analyze-fn source))
+    (Scene. (doto (BorderPane.)
+              (.setCenter center)
+              (.setRight (:node hist))
+              (.setBottom grid))
+            1200 800)))
 
 (defn show!
   "Starts the JavaFX runtime (if needed) and opens the main window.
   `source` is a pure image map; `render-fn` takes a settings map and returns
-  an image map."
-  [source render-fn]
+  an image map; `analyze-fn` takes a rendered image map and returns histogram
+  data (see darkroom.imaging.histogram/compute)."
+  [source render-fn analyze-fn]
   (let [open! (fn []
                 (doto (Stage.)
                   (.setTitle "Groovehaus Darkroom")
-                  (.setScene (build-scene source render-fn))
+                  (.setScene (build-scene source render-fn analyze-fn))
                   (.show)))]
     (try
       (Platform/startup ^Runnable open!)
