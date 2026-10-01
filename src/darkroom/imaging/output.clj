@@ -157,7 +157,7 @@
   "The finished scene image for a frame: developed with `adj` at full quality,
   resized to the long edge, sharpened for the destination, watermarked."
   [path adj {:keys [size sharpen] :as opts}]
-  (let [img (-> (pipeline/render (loader/load-scene path) adj {:quality :final})
+  (let [img (-> (pipeline/render (loader/load-scene path adj) adj {:quality :final})
                 (geometry/resize-long-edge (when (pos? (long (or size 0))) size))
                 (sharpen-output sharpen))]
     (if-let [spec (:watermark opts)] (watermark img spec) img)))

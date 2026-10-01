@@ -6,6 +6,8 @@
             [darkroom.imaging.crop :as crop]
             [darkroom.imaging.histogram :as histogram]
             [darkroom.imaging.local :as local]
+            [darkroom.imaging.paths :as paths]
+            [darkroom.imaging.raw :as raw]
             [darkroom.imaging.develop :as develop]
             [darkroom.imaging.geometry :as geometry]
             [darkroom.imaging.pipeline :as pipeline]
@@ -586,10 +588,66 @@
     {:node (w/vbox 14 fp (:node c) reset)
      :sync! (fn [adj] ((:sync! c) adj) (show!))}))
 
-(defn- color-body
-  "HSL mixer (one band at a time) and split toning."
+(defn- profile-section
+  "Camera profile picker for RAW files: DEFAULT (LibRaw's built-in matrix) or
+  one of the .dcp profiles the catalog knows. Returns {:node :sync! (fn [adj])}."
   []
-  (let [band     (atom 0)
+  (let [pills   (FlowPane. 8.0 8.0)
+        tools   (FlowPane. 8.0 8.0)
+        note    (w/tlabel "" :normal "sys-10" "faint")
+        memo    (atom nil)
+        add-btn (doto (w/pill "ADD PROFILE…"
+                              (fn []
+                                (let [ch (doto (javafx.stage.FileChooser.) (.setTitle "Camera profiles (.dcp)"))]
+                                  (.add (.getExtensionFilters ch) (javafx.stage.FileChooser$ExtensionFilter. "DNG camera profile" ["*.dcp" "*.DCP"]))
+                                  (when-let [fs (.showOpenMultipleDialog ch (first (javafx.stage.Window/getWindows)))]
+                                    (let [{:keys [added failed]} (st/add-camera-profiles! fs)]
+                                      (st/toast! (cond (and (pos? added) (empty? failed)) (str added " PROFILE" (when (not= added 1) "S") " ADDED")
+                                                       (pos? added) (str added " ADDED · " (count failed) " UNREADABLE")
+                                                       :else "NOT A CAMERA PROFILE"))))))
+                              "sm")
+                  (w/set-base-a11y! "Add camera profile files"))
+        auto-btn  (doto (w/pill "MATCH MY CAMERA" (fn [] (st/auto-camera-profile!)) "sm")
+                    (w/set-base-a11y! "Pick the profile made for this photo's camera"))
+        curve-btn (doto (w/pill "PROFILE TONE CURVE" (fn [] (st/toggle-profile-curve!)) "sm")
+                    (w/set-base-a11y! "Use the profile's own tone curve"))]
+    (.addAll (.getChildren tools) (java.util.Arrays/asList (into-array javafx.scene.Node [add-btn auto-btn curve-btn])))
+    {:node (w/vbox 10 (w/tlabel "CAMERA PROFILE" :wide "sys" "dim") pills tools note)
+     :sync! (fn [adj]
+              (let [path (:cur @st/state)
+                    raw? (boolean (and path (raw/raw-file? (paths/source-file path))))
+                    profiles (st/camera-profiles)
+                    cur (:camera-profile adj)
+                    sig [profiles cur raw?]]
+                (when (not= sig @memo)
+                  (reset! memo sig)
+                  (w/keep-focus!
+                    pills
+                    (fn []
+                      (w/clear! pills)
+                      (let [def-b (doto (w/pill "DEFAULT" (fn [] (st/set-camera-profile! nil)) "sm")
+                                    (w/set-base-a11y! "Default camera colour (built-in matrix)"))]
+                        (w/set-on! def-b (nil? cur)) (.setDisable def-b (not raw?))
+                        (w/add! pills def-b))
+                      (doseq [{:keys [path name]} profiles]
+                        (let [b (doto (w/pill (.toUpperCase ^String name) (fn [] (st/set-camera-profile! path)) "sm")
+                                  (w/set-base-a11y! (str "Camera profile " name)))
+                              x (doto (w/pill "×" (fn [] (st/remove-camera-profile! path)) "sm")
+                                  (w/set-base-a11y! (str "Remove profile " name)))]
+                          (w/set-on! b (= path cur)) (.setDisable b (not raw?))
+                          (w/add! pills b x)))))
+                  (.setText note (theme/tracked (cond (not raw?) "CAMERA PROFILES APPLY TO RAW FILES ONLY"
+                                                      (empty? profiles) "ADD A .DCP FILE (FROM LIGHTROOM / CAMERA RAW / DNG PROFILE EDITOR)"
+                                                      :else "") :normal)))
+                (w/set-on! curve-btn (boolean (:camera-profile-curve adj)))
+                (.setDisable curve-btn (or (not raw?) (nil? cur)))
+                (.setDisable auto-btn (not raw?))))}))
+
+(defn- color-body
+  "Camera profile, HSL mixer (one band at a time) and split toning."
+  []
+  (let [profile  (profile-section)
+        band     (atom 0)
         names    (mapv first develop/hsl-bands)
         hsl-of   (fn [adj] (vec (get adj :hsl develop/default-hsl)))
         set-hsl! (fn [i v] (let [hsl (hsl-of (st/cur-adj @st/state))
@@ -613,9 +671,11 @@
       (.setOnAction b (w/handler (fn [_] (reset! band i) (show! (st/cur-adj @st/state))))))
     (doseq [b pills] (.add (.getChildren fp) b))
     {:node (w/vbox 18
+                   (:node profile)
                    (w/tlabel "HSL" :wide "sys" "dim") fp (apply w/vbox 18 (map :node rows))
                    (w/tlabel "SPLIT TONING" :wide "sys" "dim") (apply w/vbox 18 (map :node grading)))
      :sync! (fn [adj]
+              ((:sync! profile) adj)
               (show! adj)
               (doseq [{:keys [key set-value!]} grading] (set-value! (get adj key))))}))
 

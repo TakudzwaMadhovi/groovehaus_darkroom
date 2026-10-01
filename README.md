@@ -82,6 +82,25 @@ distortion and fringe sliders. Not implemented: vignetting, the ACM and poly3 TC
 lens-centre offsets, and matching by anything but the EXIF lens name (a lens whose name
 the camera writes differently from the database finds no profile; the toast says so).
 
+### Camera profiles (RAW)
+
+COLOR tab → CAMERA PROFILE. By default RAW files use LibRaw's built-in camera matrix.
+`ADD PROFILE…` takes DNG camera profiles (`.dcp`, e.g. from Lightroom / Camera Raw /
+Adobe's DNG Profile Editor, or the open ones shipped with RawTherapee); `MATCH MY CAMERA`
+picks the one made for the photo's EXIF make and model, or pick one by name. The frame is
+then decoded as the camera's own white-balanced RGB and rendered the way the DNG
+specification describes: the as-shot white picks a point between the profile's two
+illuminants (interpolated in mireds), the ForwardMatrix (or the ColorMatrix, adapted to D50)
+gives XYZ, and the profile's hue / saturation / value table and look table move colours
+in ProPhoto-primaries HSV, the part that gives a profile its style. `PROFILE TONE CURVE`
+adds the profile's own tone curve (off by default: this editor has its own tone controls).
+The choice is a per-frame setting (one history step); presets leave it alone; changing it
+reloads the frame. Verified against real profiles (table order checked by smoothness) and a
+synthetic DNG whose matrix-only profile reproduces LibRaw's own conversion.
+
+Not implemented: DefaultBlackRender, ICC input profiles, the profile policy flags, and
+profiles for non-RAW files; four-colour sensors fall back to the default decode path.
+
 ### Hot folder and sharing a catalog
 
 - `WATCH FOLDER` (Library toolbar) imports every image that appears in a folder into the
@@ -127,6 +146,7 @@ by path, modification time and size.
 | `darkroom.imaging.histogram` / `export` / `browser` | Histogram, JPEG / PNG / 16-bit TIFF / WebP writers (ICC, EXIF), folder scan + thumbnails |
 | `darkroom.imaging.output` | File-name templates, output sharpening, watermark, metadata modes, rendering one or many frames to disk |
 | `darkroom.catalog` | Pure library model: shoots, frames, ratings, reject flags, colour labels, keywords, notes, adjustments, undo / redo history, snapshots, user presets, virtual copies, copy / paste, search and sort; EDN persistence |
+| `darkroom.imaging.dcp` / `camera` | DNG camera profile (.dcp) reader; camera RGB → XYZ → working space with the profile's matrices, hue/sat/val table, look table and tone curve |
 | `darkroom.imaging.lens` / `watch` | lensfun profile lookup, interpolation and rescaling; hot-folder watcher |
 | `darkroom.imaging.xmp` / `paths` / `thumbcache` | XMP sidecar read / write; virtual-copy paths (`file#vcN`); on-disk thumbnail cache |
 | `darkroom.ui.state` | App state atom and actions |

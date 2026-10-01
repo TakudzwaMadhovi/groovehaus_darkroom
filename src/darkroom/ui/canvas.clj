@@ -54,6 +54,13 @@
       (/ (double w) (double h)))
     1.5))
 
+(defn- source-key
+  "What decides how `path` is decoded: its camera profile and whether the
+  profile's tone curve is used (see pipeline/source-keys)."
+  [path]
+  (let [adj (cat/adj (:catalog @st/state) path)]
+    [(:camera-profile adj) (boolean (:camera-profile-curve adj))]))
+
 (defn render-settings
   "The settings the canvas renders for state `s`: the edits, or the original
   while comparing; while the CROP tab is open the whole frame, so the crop
@@ -97,22 +104,28 @@
                                                                   (when on-histogram (on-histogram hist))))))
                                         (catch Throwable t (.printStackTrace t))))))))))
         load!   (fn load! [path]
-                  (when (and path (not (session path)) (not (@loading path)))
+                  ;; a frame is (re)loaded when it is not loaded, or was loaded with another camera profile
+                  (when (and path (not (@loading path))
+                             (or (not (session path)) (not= (:source-key (session path)) (source-key path))))
                     (swap! loading conj path)
                     (when on-loading (on-loading true))
                     (.execute load-worker
                               (fn []
                                 (try
-                                  (let [source  (loader/load-scene path)
+                                  (let [adj     (cat/adj (:catalog @st/state) path)
+                                        skey    (source-key path)
+                                        source  (loader/load-scene path adj)
                                         preview (scene/fit source (preview-side))]
                                     (remember! path {:preview preview :renderer (pipeline/renderer preview)
+                                                     :source-key skey
                                                      :scale (/ (double (:width preview)) (double (:width source)))})
                                     (Platform/runLater
                                       (fn []
                                         (swap! loading disj path)
                                         (when (= path (:cur @st/state))
                                           (when on-loading (on-loading false))
-                                          (render! @st/state :preview)))))
+                                          (render! @st/state :preview)
+                                          (load! path)))))
                                   (catch Throwable t
                                     (Platform/runLater
                                       (fn []

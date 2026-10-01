@@ -22,8 +22,9 @@
 
 (def preserved-keys
   "Settings a preset or a paste of settings never touches: where and what the
-  picture is (geometry), its retouching (spots) and its masks."
-  (into (vec geometry/geometry-keys) [:spots :local]))
+  picture is (geometry), its retouching (spots), its masks and how its RAW file
+  is decoded (camera profile)."
+  (into (vec geometry/geometry-keys) [:spots :local :camera-profile :camera-profile-curve]))
 
 (def presets
   "[name adjustments] from the design handoff. Applying one resets every
@@ -331,7 +332,9 @@
    :curve   [:curve :curve-r :curve-g :curve-b]
    :effects [:fade :bw :grain :vignette]
    :geometry (vec geometry/geometry-keys)
-   :retouch [:spots :local]})
+   :retouch [:spots :local]
+   ;; how the RAW file is decoded; camera-specific, so not copied by default
+   :profile [:camera-profile :camera-profile-curve]})
 
 (def default-copy-groups [:tone :color :detail :curve :effects])
 

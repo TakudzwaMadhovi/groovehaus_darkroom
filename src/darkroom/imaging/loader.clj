@@ -18,9 +18,14 @@
 
 (defn load-scene
   "Frame path (or virtual-copy id) -> float scene image in the working colour
-  space, ready for the pipeline. RAW files keep their full 16-bit linear precision."
-  [id]
-  (let [path (paths/source-file id)]
-    (if (raw/raw-file? path)
-      (raw/load-scene path)
-      (scene/from-argb (load-image path)))))
+  space, ready for the pipeline. RAW files keep their full 16-bit linear precision.
+  `settings` (optional, a frame's settings): a :camera-profile (path of a .dcp)
+  renders a RAW file through that profile, with :camera-profile-curve also its
+  tone curve; other files ignore them."
+  ([id] (load-scene id nil))
+  ([id {:keys [camera-profile camera-profile-curve]}]
+   (let [path (paths/source-file id)]
+     (cond
+       (not (raw/raw-file? path)) (scene/from-argb (load-image path))
+       camera-profile (raw/load-scene-with-profile path camera-profile {:tone-curve? (boolean camera-profile-curve)})
+       :else (raw/load-scene path)))))

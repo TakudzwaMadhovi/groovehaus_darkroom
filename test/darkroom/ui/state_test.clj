@@ -1,6 +1,7 @@
 (ns darkroom.ui.state-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [darkroom.catalog :as cat]
+            [darkroom.dcp-fixture]
             [darkroom.imaging.core]
             [darkroom.imaging.exif]
             [darkroom.imaging.export]
@@ -340,3 +341,36 @@
       (reset! st/lens-db (darkroom.imaging.lens/parse-database (.getBytes "<lensdatabase/>" "UTF-8")))
       (is (nil? (st/apply-lens-profile!))))
     (reset! st/lens-db [])))
+
+(deftest camera-profiles-are-listed-applied-and-matched
+  (let [d (tmp-dir)
+        cm darkroom.dcp-fixture/srgb-from-xyz-d65
+        mk (fn [n cam] (let [f (java.io.File. d n)]
+                         (java.nio.file.Files/write (.toPath f)
+                           ^bytes (darkroom.dcp-fixture/dcp-bytes [[50936 2 n] [50708 2 cam] [50721 10 cm] [50778 3 [21]]])
+                           (into-array java.nio.file.OpenOption []))
+                         f))
+        a (mk "Neutral" "Test Camera X") b (mk "Other" "Some Other Camera")
+        junk (let [f (java.io.File. d "junk.dcp")] (spit f "not a profile") f)
+        jpg (darkroom.imaging.export/save! (darkroom.imaging.core/image 8 8 (int-array 64 (unchecked-int 0xFF808080)))
+                                           {:dir (.getPath d) :name "shot" :format :jpeg
+                                            :exif (darkroom.imaging.exif/exif-block {:make "TEST" :model "Test Camera X"} {})})]
+    (st/create-shoot! "P" [(.getPath jpg)])
+    (is (= {:added 2 :failed ["junk.dcp"]} (st/add-camera-profiles! [a b junk])))
+    (is (= ["Neutral" "Other"] (mapv :name (st/camera-profiles))))
+    (is (= {:added 2 :failed []} (st/add-camera-profiles! [a b])) "adding again does not duplicate")
+    (is (= 2 (count (:camera-profiles (:catalog @st/state)))))
+    (let [hit (st/auto-camera-profile!)]
+      (is (= "Neutral" (:name hit)) "matched on the EXIF camera model")
+      (is (= (.getPath a) (:camera-profile (st/cur-adj @st/state))))
+      (is (= "CAMERA PROFILE" (:label (last (:history (cat/frame (:catalog @st/state) (.getPath jpg))))))))
+    (st/toggle-profile-curve!)
+    (is (true? (:camera-profile-curve (st/cur-adj @st/state))))
+    (testing "a preset does not change the profile"
+      (st/apply-preset! "SILVER")
+      (is (= (.getPath a) (:camera-profile (st/cur-adj @st/state)))))
+    (st/remove-camera-profile! (.getPath a))
+    (is (nil? (:camera-profile (st/cur-adj @st/state))) "frames using a removed profile go back to the default")
+    (is (= ["Other"] (mapv :name (st/camera-profiles))))
+    (st/remove-camera-profile! (.getPath b))
+    (is (nil? (st/auto-camera-profile!)) "nothing to match")))

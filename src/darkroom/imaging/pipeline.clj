@@ -69,9 +69,16 @@
     :op       (fn [img s opts] (local/apply-local img s opts))
     :scaled?  true}])
 
+(def source-keys
+  "Settings that choose how the RAW file is decoded (the camera profile, see
+  darkroom.imaging.camera) rather than what is done to the picture afterwards:
+  no pipeline stage reads them, the loader does, and changing one reloads the frame."
+  [:camera-profile :camera-profile-curve])
+
 (def default-settings
   "Neutral value for every setting."
-  (merge develop/defaults detail/defaults heal/defaults local/defaults {:denoise 0}))
+  (merge develop/defaults detail/defaults heal/defaults local/defaults {:denoise 0}
+         {:camera-profile nil :camera-profile-curve false}))
 
 (defn- full [settings] (merge default-settings settings))
 

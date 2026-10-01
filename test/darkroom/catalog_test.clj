@@ -213,7 +213,7 @@
   (let [grouped (set (concat (mapcat val cat/setting-groups)))]
     (is (= (set (keys pipeline/default-settings)) grouped) "no setting is missing from (or invented by) the groups")
     (is (= (count grouped) (count (mapcat val cat/setting-groups))) "and none is in two groups")
-    (is (= (set cat/preserved-keys) (set (concat (:geometry cat/setting-groups) (:retouch cat/setting-groups)))))))
+    (is (= (set cat/preserved-keys) (set (concat (:geometry cat/setting-groups) (:retouch cat/setting-groups) (:profile cat/setting-groups)))))))
 
 (deftest copy-and-paste-settings
   (let [p "/a.jpg" q "/b.jpg"

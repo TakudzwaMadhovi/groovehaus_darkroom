@@ -29,6 +29,7 @@
             [clojure.string :as str]
             [darkroom.catalog :as cat]
             [darkroom.imaging.browser :as browser]
+            [darkroom.imaging.camera :as camera]
             [darkroom.imaging.exif :as exif]
             [darkroom.imaging.lens :as lens]
             [darkroom.imaging.local :as local]
@@ -476,6 +477,80 @@
         (save-soon!)
         (count ps)))))
 
+;; --------------------------------------------------------- camera profiles
+
+(defonce profile-info (atom {})) ; .dcp path -> {:name :camera} (or {:error msg})
+
+(defn- read-profile-info!
+  "Reads the .dcp at `path`, remembers its name and camera, and returns that info
+  ({:error message} when it is not a usable profile)."
+  [path]
+  (let [info (try (let [p (camera/load-profile path)] {:name (or (:name p) (.getName (File. ^String path))) :camera (:camera p)})
+                  (catch Throwable t {:error (or (.getMessage t) "unreadable")}))]
+    (swap! profile-info assoc path info)
+    info))
+
+(defn camera-profiles
+  "The camera profiles the catalog knows: [{:path :name :camera}] (unreadable ones are left out)."
+  ([] (camera-profiles @state))
+  ([st]
+   (vec (for [p (:camera-profiles (:catalog st))
+              :let [i (get @profile-info p)]
+              :when (and i (not (:error i)))]
+          (assoc i :path p)))))
+
+(defn add-camera-profiles!
+  "Adds the .dcp files to the catalog's profile list. Returns {:added n :failed [file names]}."
+  [files]
+  (let [paths (mapv #(.getPath ^File %) files)
+        results (mapv (fn [p] [p (read-profile-info! p)]) paths)
+        ok (mapv first (remove (comp :error second) results))]
+    (when (seq ok)
+      (update-catalog! (fn [c] (assoc c :camera-profiles (vec (distinct (concat (:camera-profiles c) ok)))))))
+    {:added (count ok) :failed (mapv #(.getName (File. ^String (first %))) (filter (comp :error second) results))}))
+
+(defn remove-camera-profile!
+  "Forgets a profile (frames that use it fall back to the default decode)."
+  [path]
+  (update-catalog! (fn [c]
+                     (let [c (assoc c :camera-profiles (vec (remove #{path} (:camera-profiles c))))]
+                       (reduce (fn [c p] (if (= path (:camera-profile (cat/adj c p)))
+                                           (-> c (cat/set-adj p :camera-profile nil) (cat/commit p "CAMERA PROFILE OFF"))
+                                           c))
+                               c (keys (:frames c)))))))
+
+(defn set-camera-profile!
+  "Gives the selected frames the camera profile at `path` (nil = the default decode); one history step each."
+  [path]
+  (let [ps (selection)]
+    (when (seq ps)
+      (update-catalog! (fn [c] (reduce (fn [c p] (-> c (cat/set-adj p :camera-profile path)
+                                                     (cat/commit p (if path "CAMERA PROFILE" "CAMERA PROFILE OFF"))))
+                                       c ps))))))
+
+(defn toggle-profile-curve!
+  "Switches the profile's own tone curve on or off for the selected frames."
+  []
+  (let [ps (selection)]
+    (when (seq ps)
+      (let [on? (not (:camera-profile-curve (cat/adj (:catalog @state) (first ps))))]
+        (update-catalog! (fn [c] (reduce (fn [c p] (-> c (cat/set-adj p :camera-profile-curve on?)
+                                                       (cat/commit p (if on? "PROFILE CURVE ON" "PROFILE CURVE OFF"))))
+                                         c ps)))))))
+
+(defn auto-camera-profile!
+  "Picks the profile made for the current frame's camera (EXIF make + model against the
+  profile's unique camera model) and applies it. Returns the profile entry or nil, saying why."
+  []
+  (when-let [p (:cur @state)]
+    (let [tags (or (meta-of p) (exif/read-tags p))
+          want (set (map #(str/lower-case (str/trim %))
+                         (remove str/blank? [(:model tags) (str (:make tags) " " (:model tags))])))
+          hit (first (filter #(some-> (:camera %) str/lower-case str/trim want) (camera-profiles)))]
+      (cond (empty? (camera-profiles)) (do (toast! "ADD A CAMERA PROFILE (.DCP) FIRST") nil)
+            (nil? hit) (do (toast! (str "NO PROFILE FOR " (str/upper-case (str (:model tags))))) nil)
+            :else (do (set-camera-profile! (:path hit)) (toast! (str "APPLIED " (str/upper-case (:name hit)))) hit)))))
+
 ;; ------------------------------------------------------------- lens profiles
 
 (defonce lens-db (atom []))
@@ -608,6 +683,7 @@
         s (first (:shoots c))]
     (reset! seen-mtime (.lastModified ^File @catalog-file))
     (swap! state assoc :catalog c :shoot (:id s) :cur (first (:paths s)))
+    (doseq [pp (:camera-profiles c)] (read-profile-info! pp))
     (load-saved-lens-db!)))
 
 (defn open-file!

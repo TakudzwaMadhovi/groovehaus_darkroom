@@ -8,13 +8,14 @@
   unsigned 16-bit value (read it with (bit-and s 0xFFFF)) proportional to
   scene light: gamma 1.0, sRGB/Rec. 709 primaries, camera white balance
   applied, no automatic brightening."
-  (:require [darkroom.imaging.core :as core]
+  (:require [darkroom.imaging.camera :as camera]
+            [darkroom.imaging.core :as core]
             [darkroom.imaging.scene :as scene])
   (:import (java.io ByteArrayInputStream)
            (java.nio ByteOrder)
            (javax.imageio ImageIO)
            (org.bytedeco.javacpp BytePointer)
-           (org.bytedeco.libraw libraw_data_t libraw_output_params_t libraw_processed_image_t)
+           (org.bytedeco.libraw libraw_colordata_t libraw_data_t libraw_output_params_t libraw_processed_image_t)
            (org.bytedeco.libraw.global LibRaw)))
 
 (set! *unchecked-math* :warn-on-boxed)
@@ -76,8 +77,12 @@
             (.get (.asShortBuffer (.order (.asByteBuffer (.limit ^BytePointer (.data img) (* 2 n)))
                                           (ByteOrder/nativeOrder)))
                   data)
-            {:width w :height h :channels 3 :bits 16
-             :color-space :linear-srgb :data data})
+            (cond-> {:width w :height h :channels 3 :bits 16
+                     :color-space :linear-srgb :data data}
+              (:multipliers? opts) (assoc :multipliers (let [^libraw_colordata_t c (.color lr)
+                                                             pm (mapv #(double (.pre_mul c (int %))) (range 3))
+                                                             lo (reduce min (filter pos? pm))]
+                                                         (mapv #(/ (double %) (double lo)) pm)))))
           (finally (LibRaw/libraw_dcraw_clear_mem img))))
       (finally (LibRaw/libraw_close lr)))))
 
@@ -114,6 +119,18 @@
   works on; nothing is quantised to 8 bits."
   [path & [opts]]
   (scene/from-linear16 (decode-linear path (assoc opts :output-color 4))))
+
+(defn load-scene-with-profile
+  "RAW file -> float scene image in the working colour space, with the colour
+  rendering of the camera profile (.dcp) at `profile-path` instead of LibRaw's
+  built-in matrix: the camera's own RGB (as-shot white balance applied) goes
+  through darkroom.imaging.camera. `opts` :tone-curve? applies the profile's tone
+  curve. Needs a three-colour sensor."
+  [path profile-path & [opts]]
+  (let [{:keys [multipliers] :as img} (decode-linear path (assoc opts :output-color 0 :multipliers? true))
+        [mr mg mb] (map double multipliers)
+        neutral [(/ (double mg) (double mr)) 1.0 (/ (double mg) (double mb))]]
+    (camera/render (scene/from-linear16 img) (camera/load-profile profile-path) neutral opts)))
 
 (defn load-image
   "RAW file -> display image map (decode, then sRGB-encode)."
