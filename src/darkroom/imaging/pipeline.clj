@@ -8,7 +8,10 @@
 
 (def operations
   "Ordered [setting-key operation-fn neutral-value] entries."
-  [[:brightness core/adjust-brightness 0]])
+  [[:brightness core/adjust-brightness 0]
+   [:contrast   core/adjust-contrast   0]
+   [:gamma      core/adjust-gamma      1.0]
+   [:saturation core/adjust-saturation 0]])
 
 (def default-settings
   (into {} (map (fn [[k _ neutral]] [k neutral])) operations))
@@ -18,6 +21,6 @@
   [source settings]
   (reduce (fn [img [k op neutral]]
             (let [v (get settings k neutral)]
-              (if (= v neutral) img (op img v))))
+              (if (== v neutral) img (op img v))))
           source
           operations))

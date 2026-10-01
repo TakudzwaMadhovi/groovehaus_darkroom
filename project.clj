@@ -19,4 +19,8 @@
                  ~['org.openjfx/javafx-controls javafx-version :classifier javafx-platform]]
   :main darkroom.main
   :resource-paths ["resources"]
+  ;; headless AWT: ImageIO needs no Cocoa/AWT event loop, which can conflict
+  ;; with JavaFX on macOS. Heap capped for 8 GB machines.
+  :jvm-opts ["-Djava.awt.headless=true" "-Xmx2g"]
+  :global-vars {*warn-on-reflection* true}
   :profiles {:uberjar {:aot :all}})
