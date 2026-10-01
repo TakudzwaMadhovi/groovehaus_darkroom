@@ -1,0 +1,161 @@
+/* Groovehaus Darkroom: JavaFX stylesheet.
+   Tokens from the design handoff (colors_and_type.css). Black canvas, bone type,
+   one sun-yellow accent for active / selected / changed state. No emoji. */
+
+.root {
+  -gh-obsidian: #000000;
+  -gh-ground:   #0A0A0A;
+  -gh-panel:    #121110;
+  -gh-tile:     #161413;
+  -gh-ash:      #1C1C1C;
+  -gh-bone:     #F2E9D5;
+  -gh-sun:      #E9B547;
+  -gh-rule:     rgba(242,233,213,0.14);
+  -gh-line:     rgba(242,233,213,0.30);
+  -gh-line-2:   rgba(242,233,213,0.34);
+  -fx-background-color: -gh-ground;
+  -fx-font-family: "Rajdhani";
+  -fx-font-size: 15px;
+  -fx-text-fill: -gh-bone;
+  -fx-focus-color: transparent;
+  -fx-faint-focus-color: transparent;
+}
+
+/* ---------- type -------------------------------------------------------- */
+.sys   { -fx-font-family: "Rajdhani"; -fx-font-weight: bold; -fx-font-size: 11px; -fx-text-fill: -gh-bone; }
+.sys-12 { -fx-font-size: 12px; }
+.sys-13 { -fx-font-size: 13px; }
+.sys-10 { -fx-font-family: "Rajdhani SemiBold"; -fx-font-weight: normal; -fx-font-size: 10px; }
+.sys-11s { -fx-font-family: "Rajdhani SemiBold"; -fx-font-weight: normal; -fx-font-size: 11px; }
+.display { -fx-font-family: "Bebas Neue"; -fx-text-fill: -gh-bone; }
+.editorial { -fx-font-family: "Cormorant Garamond"; -fx-font-style: italic; -fx-text-fill: rgba(242,233,213,0.6); }
+.bone   { -fx-text-fill: -gh-bone; }
+.muted  { -fx-text-fill: rgba(242,233,213,0.7); }
+.dim    { -fx-text-fill: rgba(242,233,213,0.55); }
+.faint  { -fx-text-fill: rgba(242,233,213,0.5); }
+.sun    { -fx-text-fill: -gh-sun; }
+.black-text { -fx-text-fill: #000000; }
+
+/* ---------- buttons ------------------------------------------------------ */
+.gh-btn {
+  -fx-background-color: transparent;
+  -fx-background-radius: 0;
+  -fx-padding: 0;
+  -fx-cursor: hand;
+  -fx-alignment: center-left;
+  -fx-font-family: "Rajdhani"; -fx-font-weight: bold; -fx-font-size: 11px;
+  -fx-text-fill: -gh-bone;
+  -fx-border-color: transparent; -fx-border-width: 2; -fx-border-insets: 0;
+}
+.gh-btn:hover { -fx-text-fill: -gh-bone; }
+.gh-btn:focused { -fx-border-color: rgba(242,233,213,0.55); -fx-border-radius: 2; }
+.gh-btn:disabled { -fx-opacity: 0.4; }
+
+.nav-btn { -fx-min-height: 44; -fx-pref-height: 44; -fx-text-fill: rgba(242,233,213,0.5); -fx-font-size: 12px; }
+.nav-btn:hover { -fx-text-fill: -gh-bone; }
+.nav-btn.on { -fx-text-fill: -gh-bone; }
+
+.text-btn { -fx-min-height: 44; -fx-text-fill: -gh-bone; }
+.text-btn:hover { -fx-text-fill: -gh-sun; }
+.text-btn.quiet { -fx-text-fill: rgba(242,233,213,0.6); }
+.text-btn.quiet:hover { -fx-text-fill: -gh-bone; }
+.text-btn.sun { -fx-text-fill: -gh-sun; }
+.text-btn.short { -fx-min-height: 36; }
+
+/* pills: radius 999, 1px outline */
+.pill {
+  -fx-alignment: center;
+  -fx-min-height: 44; -fx-pref-height: 44; -fx-max-height: 44;
+  -fx-padding: 0 20 0 20;
+  -fx-background-radius: 999;
+  -fx-border-radius: 999;
+  -fx-border-color: -gh-line-2; -fx-border-width: 1;
+  -fx-text-fill: -gh-bone;
+}
+.pill:hover { -fx-border-color: -gh-bone; }
+.pill:focused { -fx-border-color: -gh-bone; -fx-border-width: 2; -fx-padding: 0 19 0 19; }
+.pill.sm { -fx-min-height: 40; -fx-pref-height: 40; -fx-max-height: 40; -fx-padding: 0 16 0 16; -fx-border-color: -gh-line; -fx-text-fill: rgba(242,233,213,0.7); }
+.pill.xs { -fx-min-height: 36; -fx-pref-height: 36; -fx-max-height: 36; -fx-padding: 0 14 0 14; -fx-font-size: 10px; -fx-border-color: -gh-line; -fx-text-fill: rgba(242,233,213,0.7); }
+.pill.on { -fx-border-color: -gh-sun; -fx-text-fill: -gh-sun; }
+.pill.fill-sun { -fx-background-color: -gh-sun; -fx-text-fill: #000000; -fx-border-color: transparent; -fx-padding: 0 24 0 24; }
+.pill.fill-sun:hover { -fx-background-color: derive(-gh-sun, 12%); }
+.pill.fill-sun.in-header { -fx-padding: 0 20 0 20; }
+.pill.fill-bone { -fx-background-color: -gh-bone; -fx-text-fill: #000000; -fx-border-color: transparent; }
+.pill.sm:hover, .pill.xs:hover { -fx-border-color: -gh-bone; -fx-text-fill: -gh-bone; }
+.pill.on:hover { -fx-border-color: -gh-sun; -fx-text-fill: -gh-sun; }
+.pill.fill-bone:hover { -fx-text-fill: #000000; }
+
+/* ---------- surfaces ----------------------------------------------------- */
+.header      { -fx-background-color: -gh-obsidian; -fx-min-height: 64; -fx-pref-height: 64; -fx-max-height: 64; }
+.ground      { -fx-background-color: -gh-ground; }
+.panel       { -fx-background-color: -gh-panel; }
+.rule-right  { -fx-border-color: transparent -gh-rule transparent transparent; -fx-border-width: 0 1 0 0; }
+.rule-left   { -fx-border-color: transparent transparent transparent -gh-rule; -fx-border-width: 0 0 0 1; }
+.rule-bottom { -fx-border-color: transparent transparent -gh-rule transparent; -fx-border-width: 0 0 1 0; }
+.rule-top    { -fx-border-color: -gh-rule transparent transparent transparent; -fx-border-width: 1 0 0 0; }
+.develop-card { -fx-background-color: -gh-panel; -fx-background-radius: 28; }
+.scrim       { -fx-background-color: rgba(0,0,0,0.94); }
+.export-card { -fx-background-color: -gh-panel; -fx-background-radius: 28; -fx-padding: 32; }
+
+/* shoots sidebar rows */
+.shoot-row { -fx-background-color: transparent; -fx-border-color: transparent; -fx-border-width: 0 0 0 2; -fx-cursor: hand; -fx-padding: 10 20 10 18; }
+.shoot-row:hover { -fx-background-color: rgba(242,233,213,0.06); }
+.shoot-row.on { -fx-background-color: rgba(242,233,213,0.08); -fx-border-color: transparent transparent transparent -gh-sun; }
+.cover { -fx-background-color: -gh-ash; -fx-background-radius: 4; }
+
+/* library tiles */
+.tile { -fx-background-color: -gh-tile; -fx-background-radius: 4; -fx-border-color: transparent; -fx-border-width: 2; -fx-border-radius: 4; -fx-cursor: hand; }
+.tile.on { -fx-border-color: -gh-sun; }
+.tile-bar.on { -fx-background-color: rgba(242,233,213,0.10); }
+.tile-add { -fx-background-color: transparent; -fx-border-color: -gh-line; -fx-border-style: dashed; -fx-border-width: 1; -fx-border-radius: 4; -fx-cursor: hand; }
+.tile-add:hover { -fx-border-color: -gh-bone; }
+.star-btn { -fx-min-width: 36; -fx-min-height: 30; -fx-pref-width: 36; -fx-pref-height: 30; -fx-alignment: center; -fx-font-family: "Rajdhani"; -fx-font-size: 14px; -fx-text-fill: rgba(242,233,213,0.6); }
+.star-btn.on { -fx-text-fill: -gh-sun; }
+
+/* develop */
+.tab-btn { -fx-min-height: 44; -fx-pref-height: 44; -fx-text-fill: rgba(242,233,213,0.5); -fx-border-color: transparent transparent transparent transparent; -fx-border-width: 0 0 2 0; -fx-alignment: center; }
+.tab-btn:hover { -fx-text-fill: -gh-bone; }
+.tab-btn.on { -fx-text-fill: -gh-bone; -fx-border-color: transparent transparent -gh-sun transparent; }
+.thumb-frame { -fx-background-color: -gh-ash; -fx-background-radius: 10; -fx-border-color: transparent; -fx-border-width: 2; -fx-border-radius: 10; }
+.thumb-frame.on { -fx-border-color: -gh-bone; }
+.preset-row { -fx-border-color: transparent transparent -gh-rule transparent; -fx-border-width: 0 0 1 0; -fx-padding: 10 0 10 0; -fx-text-fill: rgba(242,233,213,0.7); -fx-cursor: hand; }
+.preset-row .display { -fx-text-fill: rgba(242,233,213,0.7); }
+.preset-row .sys { -fx-text-fill: rgba(242,233,213,0.7); }
+.preset-row:hover .display, .preset-row:hover .sys { -fx-text-fill: -gh-bone; }
+
+/* text field */
+.gh-input { -fx-background-color: -gh-ground; -fx-background-radius: 2; -fx-border-color: -gh-line; -fx-border-radius: 2; -fx-border-width: 1; -fx-text-fill: -gh-bone; -fx-prompt-text-fill: rgba(242,233,213,0.4); -fx-font-family: "Rajdhani"; -fx-font-size: 15px; -fx-padding: 10 12 10 12; -fx-highlight-fill: rgba(233,181,71,0.35); -fx-highlight-text-fill: -gh-bone; }
+.gh-input:focused { -fx-border-color: -gh-bone; }
+
+/* ---------- slider ------------------------------------------------------- */
+.gh-slider { -fx-padding: 0; -fx-pref-height: 28; -fx-min-height: 28; -fx-max-height: 28; -fx-cursor: hand; }
+.gh-slider .track { -fx-background-color: rgba(242,233,213,0.2); -fx-background-insets: 13 0 13 0; -fx-background-radius: 0; -fx-padding: 0; -fx-pref-height: 28; }
+.gh-slider .thumb {
+  -fx-background-color: -gh-bone;
+  -fx-background-insets: 0;
+  -fx-background-radius: 7;
+  -fx-padding: 7;
+  -fx-effect: null;
+}
+.gh-slider:hover .thumb   { -fx-background-color: rgba(242,233,213,0.14), -gh-bone; -fx-background-insets: -6, 0; -fx-background-radius: 13, 7; }
+.gh-slider .thumb:pressed { -fx-background-color: rgba(233,181,71,0.22), -gh-sun; -fx-background-insets: -8, 0; -fx-background-radius: 15, 7; }
+.gh-slider:focused .thumb { -fx-background-color: -gh-bone, -gh-ground, -gh-bone; -fx-background-insets: -5, -3, 0; -fx-background-radius: 12, 10, 7; }
+.gh-slider:focused:hover .thumb { -fx-background-color: -gh-bone, -gh-ground, -gh-bone; -fx-background-insets: -5, -3, 0; -fx-background-radius: 12, 10, 7; }
+
+/* scroll panes: no chrome, thin bar */
+.scroll-pane { -fx-background-color: transparent; -fx-background-insets: 0; -fx-padding: 0; }
+.scroll-pane > .viewport { -fx-background-color: transparent; }
+.scroll-pane .scroll-bar:vertical, .scroll-pane .scroll-bar:horizontal { -fx-background-color: transparent; -fx-padding: 0; }
+.scroll-pane .scroll-bar:vertical { -fx-pref-width: 6; }
+.scroll-pane .scroll-bar:horizontal { -fx-pref-height: 0; -fx-max-height: 0; }
+.scroll-pane .scroll-bar .thumb { -fx-background-color: rgba(128,128,128,0.4); -fx-background-radius: 3; -fx-background-insets: 0; }
+.scroll-pane .scroll-bar .track, .scroll-pane .scroll-bar .increment-button, .scroll-pane .scroll-bar .decrement-button, .scroll-pane .scroll-bar .increment-arrow, .scroll-pane .scroll-bar .decrement-arrow { -fx-background-color: transparent; -fx-padding: 0; -fx-pref-height: 0; -fx-pref-width: 0; }
+.scroll-pane .corner { -fx-background-color: transparent; }
+
+.toast { -fx-background-color: -gh-bone; -fx-background-radius: 999; -fx-padding: 10 22 10 22; }
+.toast .sys { -fx-text-fill: #000000; }
+
+.quiet-label { -fx-text-fill: rgba(242,233,213,0.6); -fx-font-size: 11px; }
+.quiet-label:hover { -fx-text-fill: -gh-bone; }
+
+.page-cream { -fx-background-color: -gh-bone; }

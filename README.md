@@ -1,69 +1,67 @@
 # Groovehaus Darkroom
 
-Desktop image processing app in Clojure + JavaFX.
+Photo editor in Clojure + JavaFX. The UI follows the Groovehaus design handoff
+(black canvas, bone type, one sun-yellow accent, Bebas Neue / Cormorant Garamond /
+Rajdhani); the engine is pure Clojure plus OpenCV (denoise) and LibRaw (RAW).
 
 ## Run
 
 Requires JDK 17+ and [Leiningen](https://leiningen.org).
 
-    lein run                    # opens resources/sample.png
-    lein run path/to/image.jpg  # opens another image
-    lein run path/to/photo.dng  # RAW: DNG, ARW, CR2/CR3, NEF, ORF, RAF, RW2, ...
+    lein run                     # opens the Library
+    lein run path/to/photo.jpg   # opens that frame in Develop (shoot = its folder)
     lein test
 
-JavaFX natives are picked automatically per OS/arch (see `project.clj`).
+JavaFX / OpenCV / LibRaw natives are chosen per OS in `project.clj`.
+Edits are non-destructive; the catalog (shoots, ratings, adjustments, history)
+is stored as EDN in the per-user data folder
+(`~/Library/Application Support/Groovehaus Darkroom/catalog.edn` on macOS).
+
+## Views
+
+- **Library**: shoots sidebar (`NEW +`), filters ALL / PICKS / EDITED, thumbnail
+  size slider, tiles with index, star (pick = 5), rating dots, EDITED flag.
+  Click selects, double-click or `↵` opens Develop. Drag files/folders onto the grid
+  or use `IMPORT +` to add frames to the open shoot.
+- **Develop**: canvas with AFTER/BEFORE, luma histogram, tabs
+  BASIC (exposure, contrast, highlights, shadows, temperature, saturation, denoise),
+  CURVE, LOOK (B&W, fade, grain, vignette), CROP (straighten, aspect, flip),
+  PRESETS, HISTORY; filmstrip "THE ROLL".
+- **Export** (`⌘E`): JPEG/PNG, long edge 1080 / 2048 / full, JPEG quality, destination
+  folder. Renders the full-resolution original; never overwrites (adds `-2`, `-3`).
+
+Shortcuts: `⌘I` import · `⌘E`/`E` export · `Esc` close · `\` hold = before ·
+`← →` frames (wraps) · `0–5` rating (same key clears) · `G` Library · `D` Develop ·
+`↵` open (Library). Double-click or click a slider's label to reset it.
 
 ## Layout
 
 | Namespace | Role |
 |---|---|
-| `darkroom.imaging.core` | Pure pixel logic: load, `fit` (preview downscale), brightness, contrast, gamma, saturation. No UI imports. |
-| `darkroom.imaging.histogram` | `compute`: per-channel (R, G, B, luma) 256-bin counts. Pure logic. |
-| `darkroom.imaging.export` | `save!`: write JPEG (quality 1–100) or PNG (lossless), atomically. |
-| `darkroom.imaging.raw` | LibRaw (Bytedeco) RAW decoding: `decode-linear` -> 16-bit linear RGB, `linear->display` -> sRGB 8-bit. |
-| `darkroom.imaging.loader` | `load-image`: RAW files via LibRaw, everything else via ImageIO. |
-| `darkroom.imaging.browser` | `scan` (images in a folder, natural order) and `thumbnail`. |
-| `darkroom.imaging.exif` | EXIF orientation reader (metadata-extractor); `core/orient` applies it. |
-| `darkroom.imaging.denoise` | Non-local-means noise reduction via OpenCV (offline, CPU only). |
-| `darkroom.imaging.pipeline` | Registry mapping settings (`{:brightness 20}`) to operations. |
-| `darkroom.ui.histogram-view` | Canvas that draws histogram data. |
-| `darkroom.ui.export-dialog` | Dialog for folder, file name, format, quality. |
-| `darkroom.ui.browser-view` | Sidebar: folder picker + lazily loaded thumbnail list. |
-| `darkroom.ui.view` | JavaFX window and controls. Calls a `render-fn`; knows no image math. |
-| `darkroom.main` | Wires the two together. |
+| `darkroom.imaging.core` | Pixel helpers: load, `fit`, `orient`, legacy brightness/contrast/gamma ops |
+| `darkroom.imaging.develop` | Develop engine: geometry (crop/straighten/flip), tone pipeline, curve LUT, resize. Port of the handoff's reference engine (parity-tested) |
+| `darkroom.imaging.denoise` | OpenCV non-local-means denoise (offline, CPU) |
+| `darkroom.imaging.pipeline` | Stages denoise → geometry → tone, with a per-stage cache for interactive use |
+| `darkroom.imaging.raw` / `loader` / `exif` | LibRaw decode to linear RGB, single image loader, EXIF orientation |
+| `darkroom.imaging.histogram` / `export` / `browser` | Histogram, JPEG/PNG writer, folder scan + thumbnails |
+| `darkroom.catalog` | Pure library model: shoots, frames, ratings, adjustments, history, presets; EDN persistence |
+| `darkroom.ui.state` | App state atom and actions |
+| `darkroom.ui.theme` / `widgets` / `darkroom.css` | Fonts, stylesheet, tracked text, buttons, slider |
+| `darkroom.ui.header` / `library` / `develop` / `curve` / `export-overlay` / `app` | Views and wiring |
+| `darkroom.ui.canvas` / `thumbs` | Background loading, rendering and thumbnail caches |
 
-## Adding a feature
+## Performance notes
 
-1. Write `(fn [image value])` in `darkroom.imaging.core` (or a new namespace) and unit-test it.
-2. Add `[:setting-key op-fn neutral-value]` to `operations` in `pipeline.clj`.
-3. Add an entry to `controls` in `darkroom.ui.view` that includes `:setting-key` in the settings map.
+- Sliders re-render a downscaled working copy (1400 px, 2000 px on Retina) off the UI
+  thread; stale requests are dropped. Tone and geometry are fused per-pixel loops
+  split across cores (about 50 ms for a 1.7 MP working copy, 0.9 s for 24 MP in tests).
+- Denoise runs at :draft quality while a slider moves and refines 300 ms later;
+  `pipeline/renderer` caches each stage so tone changes never re-run denoise.
+- JVM: `-Djava.awt.headless=true -Xmx2g` (see `project.clj`; pass them yourself for a jar).
 
-`resources/sample.png` is regenerated with `lein run -m clojure.main scripts/make_sample.clj`.
+## Notes on the design port
 
-## Performance notes (2020 Intel MacBook Air target)
-
-- Sliders re-render a downscaled preview (longest side 1600 px, `preview-max-side` in `main.clj`), off the UI thread; stale requests are dropped.
-- Per-channel ops use 256-entry lookup tables and split work across cores.
-- `project.clj` sets `-Djava.awt.headless=true` (avoids AWT/JavaFX conflicts on macOS) and `-Xmx2g`. These apply to `lein run`; pass them yourself when running a jar.
-- Double-click a slider to reset it.
-- **Export…** re-renders the full-resolution original with the current slider settings (not the preview) and writes it to the chosen folder. JPEG flattens transparency onto white.
-
-## RAW support
-
-`darkroom.imaging.raw/decode-linear` returns scene-linear data: interleaved 16-bit RGB, gamma 1.0, sRGB/Rec. 709 primaries, camera white balance applied, no auto-brightening. The editor currently works on sRGB-encoded 8-bit, so `loader/load-image` converts linear -> sRGB before the pipeline. Native LibRaw 0.21.2 comes from `org.bytedeco/libraw` (macOS x64/arm64, Linux x64, Windows x64; no Linux arm64 build). Native memory is outside the `-Xmx` heap cap.
-
-## File browser
-
-The left sidebar lists the images in the open image's folder (**Open Folder…** switches folders; sub-folders are not scanned). Click a thumbnail, or use the Up/Down arrow keys, to open it; sliders reset for each image. Thumbnails load only for rows scrolled into view, on a background thread, and the last 400 are cached in memory. Dot-files (including macOS `._` files) are ignored. JPEG/PNG/TIFF thumbnails and the main view honour the EXIF orientation tag (phone photos display upright); RAW thumbnails use the camera's embedded JPEG preview when it is at least 176 px, otherwise a half-size decode. Rapid navigation drops stale loads, so only the last-selected image is opened.
-
-## Denoise
-
-The **Denoise** slider (0-100) runs OpenCV's non-local-means colour denoiser (`fastNlMeansDenoisingColored`, Bytedeco JavaCPP build; no network, no GPU). It is the first pipeline stage so later contrast/brightness changes do not amplify noise. Native cost on Intel macOS: OpenCV ~28 MB + OpenBLAS ~16 MB jars (Linux/Windows/ARM Mac pick their own classifier in `project.clj`).
-
-Keeping it responsive:
-- Runs on the render thread, never the UI thread; stale requests are dropped.
-- While a slider moves, a fast **draft** pass runs (small search window, see `denoise/quality-params`); 300 ms after it stops, a **preview**-quality pass refines it. Export uses the slowest **final** quality (7 / 21) on the full-resolution image.
-- `pipeline/renderer` caches each stage, so moving brightness/contrast/gamma/saturation never re-runs denoise.
-- OpenCV is limited to `cores - 1` threads and its natives are loaded in the background at start-up (about 1.5 s the first time).
-
-Measured here (4 cores, 1600x1067 synthetic noisy image): draft ~350 ms, preview ~610 ms, final ~1.4 s. Quality is checked in tests by PSNR against a known clean image.
+JavaFX has no CSS letter-spacing, so tracked labels insert thin/hair spaces.
+Sliders are native `Slider`s styled in CSS with a gradient fill. The design's
+BASIC tab has no denoise or brightness/gamma controls: DENOISE was added as a 7th
+BASIC slider; the earlier brightness/gamma ops remain in `core` but are not in the UI.

@@ -1,61 +1,43 @@
 (ns darkroom.ui.histogram-view
-  "JavaFX histogram panel. Draws the data produced by
-  darkroom.imaging.histogram/compute; does no analysis itself."
-  (:import (javafx.geometry Insets)
-           (javafx.scene.canvas Canvas GraphicsContext)
-           (javafx.scene.control Label)
-           (javafx.scene.layout VBox)
-           (javafx.scene.paint Color)))
+  "Luma histogram strip for the Develop panel (design: bone bars, 64 px high,
+  scaled to the 250th-lowest bin so a few spikes do not flatten the rest)."
+  (:require [darkroom.ui.theme :as theme])
+  (:import (javafx.scene.canvas Canvas)
+           (javafx.scene.layout Pane)))
 
-(def ^:private width 280.0)
-(def ^:private height 160.0)
+(def ^:private cw 640.0)
+(def ^:private ch 160.0)
 
-(def ^:private channels
-  [[:r (Color/rgb 255 60 60 0.55)]
-   [:g (Color/rgb 60 220 60 0.55)]
-   [:b (Color/rgb 70 120 255 0.55)]])
+(defn- scale-of
+  "Reference bin count: the 250th lowest of 256 (i.e. the 6th highest)."
+  ^double [^longs bins]
+  (let [sorted (sort (vec bins))]
+    (double (max 1 (nth sorted (min 249 (dec (count sorted))))))))
 
-(defn- peak
-  "Scale reference: tallest bin ignoring the clipped end bins 0 and 255, so a
-  few blown-out pixels don't flatten the rest of the graph."
-  ^double [hist]
-  (let [m (reduce (fn [m k]
-                    (let [^longs a (hist k)]
-                      (loop [i 1 m m] (if (< i 255) (recur (inc i) (max m (aget a i))) m))))
-                  0 [:r :g :b])]
-    (double (max 1 m))))
-
-(defn- fill-channel! [^GraphicsContext gc ^longs bins ^double scale color]
-  (let [step (/ width 255.0)]
-    (.setFill gc ^Color color)
-    (.beginPath gc)
-    (.moveTo gc 0.0 height)
-    (dotimes [i 256]
-      (.lineTo gc (* i step) (- height (min height (* height (/ (aget bins i) scale))))))
-    (.lineTo gc width height)
-    (.closePath gc)
-    (.fill gc)))
-
-(defn- draw! [^Canvas canvas hist]
+(defn draw! [^Canvas canvas hist]
   (let [gc (.getGraphicsContext2D canvas)]
-    (.setFill gc (Color/rgb 28 28 30))
-    (.fillRect gc 0 0 width height)
-    (.setStroke gc (Color/rgb 70 70 74))
-    (.setLineWidth gc 1.0)
-    (doseq [q [0.25 0.5 0.75]]
-      (.strokeLine gc (* q width) 0 (* q width) height))
-    (when hist
-      (let [scale (peak hist)]
-        (doseq [[k color] channels]
-          (fill-channel! gc (hist k) scale color))))))
+    (.clearRect gc 0 0 cw ch)
+    (when-let [^longs bins (:luma hist)]
+      (let [scale (scale-of bins)
+            bw    (/ cw 256.0)]
+        (.setFill gc (theme/bone-a 0.8))
+        (dotimes [i 256]
+          (let [h (* ch (min 1.0 (/ (aget bins i) scale)))]
+            (.fillRect gc (* i bw) (- ch h) (Math/ceil bw) h)))))))
 
 (defn create
-  "Returns {:node <VBox> :update! (fn [hist])}. `update!` must be called on
-  the FX thread."
+  "Returns {:node :update!}. The canvas is drawn at 640x160 and scaled to the
+  panel width at 64 px high."
   []
-  (let [canvas (Canvas. width height)
-        title  (doto (Label. "Histogram") (.setStyle "-fx-font-weight: bold;"))
-        node   (doto (VBox. 6.0) (.setPadding (Insets. 10)))]
-    (.addAll (.getChildren node) ^"[Ljavafx.scene.Node;" (into-array javafx.scene.Node [title canvas]))
-    (draw! canvas nil)
-    {:node node :update! #(draw! canvas %)}))
+  (let [canvas (Canvas. cw ch)
+        box    (proxy [Pane] []
+                 (layoutChildren []
+                   (let [^Pane this this]
+                     (.setScaleX canvas (/ (.getWidth this) cw))
+                     (.setScaleY canvas (/ 64.0 ch))
+                     (.setLayoutX canvas (/ (- (.getWidth this) cw) 2.0))
+                     (.setLayoutY canvas (/ (- 64.0 ch) 2.0)))))]
+    (.add (.getChildren ^Pane box) canvas)
+    (.setMinHeight ^Pane box 64.0) (.setPrefHeight ^Pane box 64.0) (.setMaxHeight ^Pane box 64.0)
+    (.setStyle ^Pane box "-fx-border-color: transparent transparent rgba(242,233,213,0.14) transparent; -fx-border-width: 0 0 1 0;")
+    {:node box :update! #(draw! canvas %)}))
