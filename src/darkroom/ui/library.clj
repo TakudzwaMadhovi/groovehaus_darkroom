@@ -19,6 +19,8 @@
 ;; JavaFX wiring code: not performance-critical, so reflective interop is fine here.
 (set! *warn-on-reflection* false)
 
+(defonce grid-columns (atom 1))
+
 (defn- dots [n] (str (apply str (repeat n "●")) (apply str (repeat (- 5 n) "○"))))
 
 (defn- cover-image
@@ -38,8 +40,8 @@
         iv    (cover-image 44.0)
         _     (w/classes! cover "cover")
         label (w/tlabel name :tight "sys" "sys-12" (if on? "bone" "muted"))
-        count (w/tlabel (str (count paths) (if (= 1 (count paths)) " FRAME" " FRAMES")) :normal "sys-10" "faint")
-        text  (w/vbox 2 label count)
+        n-lbl (w/tlabel (str (count paths) (if (= 1 (count paths)) " FRAME" " FRAMES")) :normal "sys-10" "faint")
+        text  (w/vbox 2 label n-lbl)
         row   (doto (Button.) (.setMaxWidth Double/MAX_VALUE))]
     (.setClip cover (doto (javafx.scene.shape.Rectangle. 44 44) (.setArcWidth 8) (.setArcHeight 8)))
     (w/add! cover iv)
@@ -48,7 +50,8 @@
     (when-let [p (first paths)]
       (thumbs/request! p (constantly true) #(crop-square! iv %)))
     (w/classes! row "shoot-row")
-    (w/set-classes! row "on" on?)
+    (w/set-on! row on?)
+    (w/a11y! row (str name ", " (count paths) (if (= 1 (count paths)) " frame" " frames") (when on? ", current shoot")))
     (.setGraphic row (w/hbox 12 cover text))
     (.setText row "")
     (.setContentDisplay row javafx.scene.control.ContentDisplay/GRAPHIC_ONLY)
@@ -103,9 +106,17 @@
     (StackPane/setAlignment star Pos/TOP_RIGHT)
     (w/set-classes! star "on" (= 5 rating))
     (.setOnAction star (w/handler (fn [e] (.consume e) (st/toggle-pick! path))))
+    (w/a11y! star (str (if (= 5 rating) "Remove pick from " "Pick ") (cat/frame-name path)))
     (.setClip tile (doto (javafx.scene.shape.Rectangle.) (-> .widthProperty (.bind (.widthProperty tile))) (-> .heightProperty (.bind (.heightProperty tile))) (.setArcWidth 8) (.setArcHeight 8)))
     (w/classes! tile "tile")
     (w/set-classes! tile "on" on?)
+    (.setFocusTraversable tile true)
+    (.setAccessibleRole tile javafx.scene.AccessibleRole/BUTTON)
+    (w/a11y! tile (str (cat/frame-name path) ", frame " idx ", rating " rating " of 5"
+                       (when edited? ", edited") (when on? ", selected")))
+    (.setAccessibleHelp tile "Space selects. Enter opens in Develop. Arrow keys move between frames.")
+    (.setOnKeyPressed tile (w/handler (fn [^KeyEvent e]
+                                        (when (= (.getCode e) KeyCode/SPACE) (st/select! path) (.consume e)))))
     (w/add! tile body num star)
     (doseq [d [:min :pref :max]] nil)
     (.setMinSize tile size size) (.setPrefSize tile size size) (.setMaxSize tile size size)
@@ -117,15 +128,17 @@
     tile))
 
 (defn- add-tile [size on-import]
-  (let [t (w/vbox 8 (w/label "+" "display") (w/tlabel "IMPORT TO THIS SHOOT" :normal "sys" "muted"))]
+  (let [t (w/vbox 8 (w/label "+" "display") (w/tlabel "IMPORT TO THIS SHOOT" :normal "sys" "muted"))
+        b (doto (Button.) (.setAlignment Pos/CENTER))]
     (.setAlignment t Pos/CENTER)
     (.setStyle (first (.getChildren t)) "-fx-font-size: 40px; -fx-text-fill: rgba(242,233,213,0.7);")
-    (let [b (doto (StackPane.) (.setAlignment Pos/CENTER))]
-      (w/classes! b "tile-add")
-      (w/add! b t)
-      (.setMinSize b size size) (.setPrefSize b size size) (.setMaxSize b size size)
-      (.setOnMouseClicked b (w/handler (fn [_] (on-import))))
-      b)))
+    (w/classes! b "gh-btn" "tile-add")
+    (.setGraphic b t)
+    (.setContentDisplay b javafx.scene.control.ContentDisplay/GRAPHIC_ONLY)
+    (w/a11y! b "Import images to this shoot")
+    (.setMinSize b size size) (.setPrefSize b size size) (.setMaxSize b size size)
+    (.setOnAction b (w/handler (fn [_] (on-import))))
+    b))
 
 ;; --------------------------------------------------------------------- view
 
@@ -142,6 +155,8 @@
         title      (w/label "" "display")
         counts     (w/label "" "sys-11s" "faint")
         filters    (doto (HBox. 6.0) (.setAlignment Pos/CENTER))
+        filter-btns (into {} (for [k [:all :picks :edited]]
+                               [k (w/pill (name k) (fn [] (swap! st/state assoc :lf k)) "xs")]))
         size-row   (w/slider-row {:label "SIZE" :min 120 :max 360 :step 1 :value 220 :default 220 :decimals 0
                                   :on-input (fn [v] (swap! st/state assoc :tsz (long v)))})
         dev-btn    (w/pill "DEVELOP SHOOT →" (fn [] (st/go! :develop)))
@@ -159,6 +174,7 @@
                      (let [avail (max 100.0 (- (.getWidth scroll) 40.0 12.0))
                            want  (double (:tsz @st/state))
                            cols  (max 1 (long (Math/floor (/ (+ avail 10.0) (+ want 10.0)))))]
+                       (reset! grid-columns cols)
                        (/ (- avail (* 10.0 (dec cols))) cols)))
         relayout!  (fn []
                      (let [s (tile-size)]
@@ -168,11 +184,17 @@
         (fn [s]
           (let [c (:catalog s) vis (st/visible-frames s) all (st/frames s)
                 size (tile-size)]
-            (.clear (.getChildren grid))
-            (doseq [p vis]
-              (w/add! grid (tile p (inc (.indexOf ^java.util.List all p)) (= p (:cur s))
-                                 (cat/edited? c p) (cat/rating c p) size)))
-            (w/add! grid (add-tile size on-import))
+            ;; keyboard focus follows the selected frame across rebuilds
+            (w/keep-focus!
+              grid
+              (fn []
+                (.clear (.getChildren grid))
+                (doseq [p vis]
+                  (w/add! grid (tile p (inc (.indexOf ^java.util.List all p)) (= p (:cur s))
+                                     (cat/edited? c p) (cat/rating c p) size)))
+                (w/add! grid (add-tile size on-import)))
+              (fn [g] (let [i (.indexOf ^java.util.List vis (:cur @st/state))]
+                        (when (>= i 0) (.get (.getChildren g) i)))))
             (let [msg (cond (nil? (:shoot s)) "no shoots yet \u2014 import frames, or name a new shoot."
                             (empty? all) "this shoot is empty — import frames to begin."
                             (empty? vis) "nothing here — star a frame or change the filter.")]
@@ -180,6 +202,8 @@
               (.setVisible empty-msg (boolean msg)) (.setManaged empty-msg (boolean msg)))))
         main-col   (VBox.)]
     ;; static assembly
+    (apply w/add! filters (vals (select-keys filter-btns [:all :picks :edited])))
+    (w/a11y! (:slider size-row) "Thumbnail size")
     (w/classes! aside "panel" "rule-right")
     (w/classes! toolbar "rule-bottom")
     (w/classes! status "rule-top")
@@ -232,9 +256,11 @@
              sig-grid [vis (:lf s) (:cur s) (mapv #(cat/rating c %) vis) (mapv #(cat/edited? c %) vis) (:shoot s)]]
          (when (not= sig-side (:side @memo))
            (swap! memo assoc :side sig-side)
-           (.clear (.getChildren shoots-box))
-           (doseq [sh (:shoots c)]
-             (w/add! shoots-box (shoot-row sh (= (:id sh) (:shoot s)))))
+           (w/keep-focus! shoots-box
+                          (fn []
+                            (.clear (.getChildren shoots-box))
+                            (doseq [sh (:shoots c)]
+                              (w/add! shoots-box (shoot-row sh (= (:id sh) (:shoot s)))))))
            (let [^Node f (:node form)]
              (.setVisible f (boolean (:adding s))) (.setManaged f (boolean (:adding s)))
              (when (:adding s) (Platform/runLater #(.requestFocus ^Node (:input form))))))
@@ -244,11 +270,11 @@
                  picks  (count (filter #(= 5 (cat/rating c %)) fs))]
              (.setText title (or (:name shoot) "NO SHOOT"))
              (.setText counts (theme/tracked (str (count fs) " FRAMES · " edited " EDITED · " picks " PICKS") :normal))
-             (.clear (.getChildren filters))
              (doseq [[k l] [[:all (str "ALL " (count fs))] [:picks (str "PICKS " picks)] [:edited (str "EDITED " edited)]]]
-               (let [b (w/pill l (fn [] (swap! st/state assoc :lf k)) "xs")]
-                 (w/set-classes! b "fill-bone" (= k (:lf s)))
-                 (.add (.getChildren filters) b)))
+               (let [^Button b (get filter-btns k) on? (= k (:lf s))]
+                 (.setText b (theme/tracked l :normal))
+                 (w/set-classes! b "fill-bone" on?)
+                 (w/a11y! b (str "Filter: " (.toLowerCase l) (when on? ", selected")))))
              (.setStyle title "-fx-font-size: 34px;")))
          (when (not= sig-grid (:grid @memo))
            (swap! memo assoc :grid sig-grid)

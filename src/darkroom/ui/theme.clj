@@ -40,3 +40,9 @@
 (def sun   (Color/web "#E9B547"))
 (def black Color/BLACK)
 (def ground (Color/web "#0A0A0A"))
+
+(defn untracked
+  "Removes the thin/hair spaces `tracked` inserts, giving the plain text a
+  screen reader should announce (otherwise it spells labels letter by letter)."
+  [s]
+  (str/replace (str s) #"[\u2009\u200A]" ""))

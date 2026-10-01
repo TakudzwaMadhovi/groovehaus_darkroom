@@ -53,7 +53,7 @@
   (let [fp (doto (FlowPane. 8.0 8.0))]
     (doseq [[v label] items]
       (let [b (w/pill label (fn [] (on-pick v)) "sm")]
-        (w/set-classes! b "on" (= v current))
+        (w/set-on! b (= v current))
         (.add (.getChildren fp) b)))
     fp))
 
@@ -71,13 +71,16 @@
     {:node (w/vbox 18 (:node (first rows)) holder)
      :sync! (fn [adj]
               ((:set-value! (first rows)) (:angle adj))
-              (w/set-classes! flip "on" (boolean (:flip adj)))
-              (w/clear! holder)
-              (w/add! holder
-                      (w/tlabel "ASPECT" :normal "sys" "dim")
-                      (pill-row aspects (:aspect adj)
-                                (fn [a] (st/set-adj! :aspect a) (st/commit! (str "CROP " (clojure.string/upper-case a)))))
-                      flip))}))
+              (w/set-on! flip (boolean (:flip adj)))
+              (w/keep-focus!
+                holder
+                (fn []
+                  (w/clear! holder)
+                  (w/add! holder
+                          (w/tlabel "ASPECT" :normal "sys" "dim")
+                          (pill-row aspects (:aspect adj)
+                                    (fn [a] (st/set-adj! :aspect a) (st/commit! (str "CROP " (clojure.string/upper-case a)))))
+                          flip))))}))
 
 (defn- presets-body []
   (let [col (w/vbox 0)]
@@ -90,6 +93,7 @@
                                  (w/spacer) (w/tlabel "APPLY" :wide "sys"))
                          row))
         (.setMaxWidth (.getGraphic b) Double/MAX_VALUE)
+        (w/a11y! b (str "Apply preset " n))
         (.setOnAction b (w/handler (fn [_] (st/apply-preset! n))))
         (w/add! col b)))
     {:node col :sync! (fn [_] nil)}))
@@ -100,14 +104,18 @@
      :sync! (fn [_]
               (let [h (:history (cat/frame (:catalog @st/state) (:cur @st/state)))
                     n (count h)]
-                (w/clear! col)
-                (doseq [[i {:keys [label]}] (reverse (map-indexed vector h))]
-                  (let [b (w/button nil (fn [] (st/revert! i)) "text-btn" "short")
-                        cur? (= i (dec n))]
-                    (.setGraphic b (w/hbox 12 (doto (w/tlabel (format "%02d" (inc i)) :normal "sys-12" "sys" "faint") (.setMinWidth 24))
-                                           (w/tlabel label :normal "sys-12" "sys" (if cur? "bone" "dim"))))
-                    (.setText b "")
-                    (w/add! col b)))))}))
+                (w/keep-focus!
+                  col
+                  (fn []
+                    (w/clear! col)
+                    (doseq [[i {:keys [label]}] (reverse (map-indexed vector h))]
+                      (let [b (w/button nil (fn [] (st/revert! i)) "text-btn" "short")
+                            cur? (= i (dec n))]
+                        (.setGraphic b (w/hbox 12 (doto (w/tlabel (format "%02d" (inc i)) :normal "sys-12" "sys" "faint") (.setMinWidth 24))
+                                               (w/tlabel label :normal "sys-12" "sys" (if cur? "bone" "dim"))))
+                        (.setText b "")
+                        (w/a11y! b (str "Step " (inc i) ", " label (if cur? ", current" ", revert to this step")))
+                        (w/add! col b)))))))}))
 
 (defn- curve-body []
   (let [c (curve/create)
@@ -145,7 +153,8 @@
                          (.setImage iv img))))
     (w/classes! b "gh-btn")
     (.setGraphic b (w/vbox 6 box name))
-    (.setOpacity b (if on? 1.0 0.6))
+    (.setOpacity box (if on? 1.0 0.6))
+    (w/a11y! b (str (cat/frame-name path) (if on? ", current frame" ", open this frame")))
     (.setOnAction b (w/handler (fn [_] (st/select! path))))
     b))
 
@@ -165,6 +174,9 @@
         before   (w/pill "AFTER" (fn [] (swap! st/state update :before not)))
         hist     (histogram-view/create)
         tabs     (doto (FlowPane. 14.0 0.0) (.setPadding (Insets. 0 24 0 24)))
+        tab-btns (vec (for [[k l] tab-labels]
+                        [k (doto (w/button (theme/tracked l :normal) (fn [] (swap! st/state assoc :tab k)) "tab-btn")
+                             (w/set-base-a11y! (str l " tab")))]))
         body-box (doto (VBox.) (.setPadding (Insets. 20 24 20 24)))
         body-scroll (doto (ScrollPane. body-box) (.setFitToWidth true) (.setHbarPolicy ScrollPane$ScrollBarPolicy/NEVER))
         panel    (doto (VBox.) (.setMinWidth 300) (.setPrefWidth 340))
@@ -180,7 +192,9 @@
     (w/add! canvas iv loading)
     (w/classes! body-box "panel")
     (.setStyle body-scroll "-fx-background-color: transparent;")
+    (apply w/add! tabs (map second tab-btns))
     (w/classes! tabs "rule-bottom")
+    (w/a11y! (:node hist) "Luminance histogram of the edited image")
     (w/classes! panel "rule-left")
     (.setStyle hint-lbl "-fx-font-size: 16px;")
     (.setStyle name-lbl "-fx-font-size: 28px;")
@@ -229,15 +243,16 @@
                      tab (:tab s)]
                  (.setText name-lbl (if path (cat/frame-name path) ""))
                  (.setText rating (theme/tracked (dots (if path (cat/rating c path) 0)) :wide))
+                 (w/a11y! rating (str "Rating " (if path (cat/rating c path) 0) " of 5"))
                  (.setText before (theme/tracked (if (:before s) "BEFORE" "AFTER") :normal))
                  (w/set-classes! before "on" (boolean (:before s)))
-                 ;; tabs
-                 (when (not= (:tab @memo) tab)
-                   (.clear (.getChildren tabs))
-                   (doseq [[k l] tab-labels]
-                     (let [b (w/button (theme/tracked l :normal) (fn [] (swap! st/state assoc :tab k)) "tab-btn")]
-                       (w/set-classes! b "on" (= k tab))
-                       (.add (.getChildren tabs) b))))
+                 (w/a11y! before (if (:before s)
+                                   "Showing the original. Activate to show the edited image."
+                                   "Showing the edited image. Activate to compare with the original."))
+                 (w/a11y! iv (if path (str "Photo " (cat/frame-name path) (when (:before s) ", original") ", preview") "No photo"))
+                 ;; tabs are built once (so keyboard focus stays on them) and only restyled
+                 (doseq [[k b] tab-btns]
+                   (w/set-on! b (= k tab)))
                  ;; panel body: rebuild on tab / frame change, otherwise just sync values
                  (when (or (not= (:tab @memo) tab) (not= (:cur @memo) path))
                    (reset! body (body-for tab))
@@ -247,8 +262,12 @@
                  ;; filmstrip
                  (let [sig [fs path (mapv #(cat/edited? c %) fs)]]
                    (when (not= sig (:strip @memo))
-                     (.clear (.getChildren roll-row))
-                     (doseq [p fs] (w/add! roll-row (strip-thumb p (= p path))))
+                     (w/keep-focus! roll-row
+                                    (fn []
+                                      (.clear (.getChildren roll-row))
+                                      (doseq [p fs] (w/add! roll-row (strip-thumb p (= p path)))))
+                                    (fn [r] (let [i (.indexOf ^java.util.List fs (:cur @st/state))]
+                                              (when (>= i 0) (.get (.getChildren r) i)))))
                      (.setText roll-count (theme/tracked (str (count fs) " FRAMES · "
                                                               (count (filter #(cat/edited? c %) fs)) " EDITED") :normal))))
                  (swap! memo assoc :tab tab :cur path :strip [fs path (mapv #(cat/edited? c %) fs)])))}))))))

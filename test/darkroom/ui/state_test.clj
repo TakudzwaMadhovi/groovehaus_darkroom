@@ -104,3 +104,17 @@
     (is (= [:develop b] [(:view @st/state) (:cur @st/state)]))
     (is (= [a b] (st/frames)))
     (is (= (cat/shoot-name (.getName d)) (:name (cat/shoot (:catalog @st/state) (:shoot @st/state)))))))
+
+(deftest keyboard-selection-moves-through-visible-frames
+  (let [[a b c d] (shoot-with "a.png" "b.png" "c.png" "d.png")]
+    (st/select! a)
+    (st/move! 1)  (is (= b (:cur @st/state)))
+    (st/move! 2)  (is (= d (:cur @st/state)) "a row down (2 columns) from b")
+    (st/move! 5)  (is (= d (:cur @st/state)) "stops at the last frame (no wrap)")
+    (st/move! -9) (is (= a (:cur @st/state)) "stops at the first frame")
+    (testing "only visible (filtered) frames are visited"
+      (st/toggle-pick! a) (st/toggle-pick! c)
+      (swap! st/state assoc :lf :picks)
+      (st/select! a)
+      (st/move! 1)
+      (is (= c (:cur @st/state)) "skips b, which the PICKS filter hides"))))

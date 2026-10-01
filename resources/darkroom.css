@@ -21,7 +21,10 @@
   -fx-faint-focus-color: transparent;
 }
 
-/* ---------- type -------------------------------------------------------- */
+/* ---------- type --------------------------------------------------------
+   Text on dark surfaces is never dimmer than bone at 60%: that is >= 5.3:1 on
+   every surface used (WCAG AA needs 4.5:1). The handoff used .5/.55 in places;
+   those were raised to .6. test/darkroom/ui/contrast_test.clj enforces this. */
 .sys   { -fx-font-family: "Rajdhani"; -fx-font-weight: bold; -fx-font-size: 11px; -fx-text-fill: -gh-bone; }
 .sys-12 { -fx-font-size: 12px; }
 .sys-13 { -fx-font-size: 13px; }
@@ -31,12 +34,14 @@
 .editorial { -fx-font-family: "Cormorant Garamond"; -fx-font-style: italic; -fx-text-fill: rgba(242,233,213,0.6); }
 .bone   { -fx-text-fill: -gh-bone; }
 .muted  { -fx-text-fill: rgba(242,233,213,0.7); }
-.dim    { -fx-text-fill: rgba(242,233,213,0.55); }
-.faint  { -fx-text-fill: rgba(242,233,213,0.5); }
+.dim    { -fx-text-fill: rgba(242,233,213,0.6); }
+.faint  { -fx-text-fill: rgba(242,233,213,0.6); }
 .sun    { -fx-text-fill: -gh-sun; }
 .black-text { -fx-text-fill: #000000; }
 
-/* ---------- buttons ------------------------------------------------------ */
+/* ---------- buttons ------------------------------------------------------
+   Focus rings show only while the keyboard is in use (the root gets `.kbd` on
+   the first key press and loses it on mouse press), like CSS :focus-visible. */
 .gh-btn {
   -fx-background-color: transparent;
   -fx-background-radius: 0;
@@ -48,10 +53,10 @@
   -fx-border-color: transparent; -fx-border-width: 2; -fx-border-insets: 0;
 }
 .gh-btn:hover { -fx-text-fill: -gh-bone; }
-.gh-btn:focused { -fx-border-color: rgba(242,233,213,0.55); -fx-border-radius: 2; }
+.kbd .gh-btn:focused { -fx-border-color: rgba(242,233,213,0.55); -fx-border-radius: 2; }
 .gh-btn:disabled { -fx-opacity: 0.4; }
 
-.nav-btn { -fx-min-height: 44; -fx-pref-height: 44; -fx-text-fill: rgba(242,233,213,0.5); -fx-font-size: 12px; }
+.nav-btn { -fx-min-height: 44; -fx-pref-height: 44; -fx-text-fill: rgba(242,233,213,0.6); -fx-font-size: 12px; }
 .nav-btn:hover { -fx-text-fill: -gh-bone; }
 .nav-btn.on { -fx-text-fill: -gh-bone; }
 
@@ -73,7 +78,7 @@
   -fx-text-fill: -gh-bone;
 }
 .pill:hover { -fx-border-color: -gh-bone; }
-.pill:focused { -fx-border-color: -gh-bone; -fx-border-width: 2; -fx-padding: 0 19 0 19; }
+.kbd .pill:focused { -fx-border-color: -gh-bone; -fx-border-width: 2; -fx-padding: 0 19 0 19; }
 .pill.sm { -fx-min-height: 40; -fx-pref-height: 40; -fx-max-height: 40; -fx-padding: 0 16 0 16; -fx-border-color: -gh-line; -fx-text-fill: rgba(242,233,213,0.7); }
 .pill.xs { -fx-min-height: 36; -fx-pref-height: 36; -fx-max-height: 36; -fx-padding: 0 14 0 14; -fx-font-size: 10px; -fx-border-color: -gh-line; -fx-text-fill: rgba(242,233,213,0.7); }
 .pill.on { -fx-border-color: -gh-sun; -fx-text-fill: -gh-sun; }
@@ -113,7 +118,7 @@
 .star-btn.on { -fx-text-fill: -gh-sun; }
 
 /* develop */
-.tab-btn { -fx-min-height: 44; -fx-pref-height: 44; -fx-text-fill: rgba(242,233,213,0.5); -fx-border-color: transparent transparent transparent transparent; -fx-border-width: 0 0 2 0; -fx-alignment: center; }
+.tab-btn { -fx-min-height: 44; -fx-pref-height: 44; -fx-text-fill: rgba(242,233,213,0.6); -fx-border-color: transparent transparent transparent transparent; -fx-border-width: 0 0 2 0; -fx-alignment: center; }
 .tab-btn:hover { -fx-text-fill: -gh-bone; }
 .tab-btn.on { -fx-text-fill: -gh-bone; -fx-border-color: transparent transparent -gh-sun transparent; }
 .thumb-frame { -fx-background-color: -gh-ash; -fx-background-radius: 10; -fx-border-color: transparent; -fx-border-width: 2; -fx-border-radius: 10; }
@@ -124,7 +129,7 @@
 .preset-row:hover .display, .preset-row:hover .sys { -fx-text-fill: -gh-bone; }
 
 /* text field */
-.gh-input { -fx-background-color: -gh-ground; -fx-background-radius: 2; -fx-border-color: -gh-line; -fx-border-radius: 2; -fx-border-width: 1; -fx-text-fill: -gh-bone; -fx-prompt-text-fill: rgba(242,233,213,0.4); -fx-font-family: "Rajdhani"; -fx-font-size: 15px; -fx-padding: 10 12 10 12; -fx-highlight-fill: rgba(233,181,71,0.35); -fx-highlight-text-fill: -gh-bone; }
+.gh-input { -fx-background-color: -gh-ground; -fx-background-radius: 2; -fx-border-color: -gh-line; -fx-border-radius: 2; -fx-border-width: 1; -fx-text-fill: -gh-bone; -fx-prompt-text-fill: rgba(242,233,213,0.6); -fx-font-family: "Rajdhani"; -fx-font-size: 15px; -fx-padding: 10 12 10 12; -fx-highlight-fill: rgba(233,181,71,0.35); -fx-highlight-text-fill: -gh-bone; }
 .gh-input:focused { -fx-border-color: -gh-bone; }
 
 /* ---------- slider ------------------------------------------------------- */
@@ -139,8 +144,8 @@
 }
 .gh-slider:hover .thumb   { -fx-background-color: rgba(242,233,213,0.14), -gh-bone; -fx-background-insets: -6, 0; -fx-background-radius: 13, 7; }
 .gh-slider .thumb:pressed { -fx-background-color: rgba(233,181,71,0.22), -gh-sun; -fx-background-insets: -8, 0; -fx-background-radius: 15, 7; }
-.gh-slider:focused .thumb { -fx-background-color: -gh-bone, -gh-ground, -gh-bone; -fx-background-insets: -5, -3, 0; -fx-background-radius: 12, 10, 7; }
-.gh-slider:focused:hover .thumb { -fx-background-color: -gh-bone, -gh-ground, -gh-bone; -fx-background-insets: -5, -3, 0; -fx-background-radius: 12, 10, 7; }
+.kbd .gh-slider:focused .thumb { -fx-background-color: -gh-bone, -gh-ground, -gh-bone; -fx-background-insets: -5, -3, 0; -fx-background-radius: 12, 10, 7; }
+.kbd .gh-slider:focused:hover .thumb { -fx-background-color: -gh-bone, -gh-ground, -gh-bone; -fx-background-insets: -5, -3, 0; -fx-background-radius: 12, 10, 7; }
 
 /* scroll panes: no chrome, thin bar */
 .scroll-pane { -fx-background-color: transparent; -fx-background-insets: 0; -fx-padding: 0; }
@@ -159,3 +164,7 @@
 .quiet-label:hover { -fx-text-fill: -gh-bone; }
 
 .page-cream { -fx-background-color: -gh-bone; }
+
+.kbd .tile:focused { -fx-border-color: -gh-bone; }
+.kbd .tile.on:focused { -fx-border-color: -gh-sun; -fx-effect: dropshadow(gaussian, rgba(233,181,71,0.6), 10, 0.2, 0, 0); }
+.kbd .curve-pane:focused { -fx-border-color: rgba(242,233,213,0.55); -fx-border-width: 1; -fx-border-radius: 2; }

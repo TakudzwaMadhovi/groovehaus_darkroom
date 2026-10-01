@@ -57,8 +57,13 @@
 (defn- typing? [^Scene scene]
   (instance? TextInputControl (.getFocusOwner scene)))
 
-(defn- on-slider? [^Scene scene]
-  (instance? Slider (.getFocusOwner scene)))
+(defn- on-slider?
+  "True when the focused control uses the arrow keys itself (sliders, the tone
+  curve), so they must not also move between frames."
+  [^Scene scene]
+  (let [o (.getFocusOwner scene)]
+    (boolean (or (instance? Slider o)
+                 (and o (.get (.getProperties o) "owns-arrows"))))))
 
 (defn- install-shortcuts! [^Scene scene {:keys [import!]}]
   (.addEventFilter
@@ -74,8 +79,12 @@
             (typing? scene) nil
             (= code KeyCode/ESCAPE) (swap! st/state assoc :exporting false)
             (:exporting s) nil
-            (and (= code KeyCode/RIGHT) (not (on-slider? scene))) (do (st/nav! 1) (.consume e))
-            (and (= code KeyCode/LEFT) (not (on-slider? scene))) (do (st/nav! -1) (.consume e))
+            (and (#{KeyCode/UP KeyCode/DOWN} code) (= :library (:view s)) (not (on-slider? scene)))
+            (do (st/move! (* (if (= code KeyCode/DOWN) 1 -1) (long @library/grid-columns))) (.consume e))
+            (and (= code KeyCode/RIGHT) (not (on-slider? scene)))
+            (do (if (= :library (:view s)) (st/move! 1) (st/nav! 1)) (.consume e))
+            (and (= code KeyCode/LEFT) (not (on-slider? scene)))
+            (do (if (= :library (:view s)) (st/move! -1) (st/nav! -1)) (.consume e))
             (and (= code KeyCode/ENTER) (= :library (:view s))
                  (not (some-> (.getFocusOwner scene) .getStyleClass (.contains "gh-btn"))))
             (do (st/go! :develop) (.consume e))
@@ -109,7 +118,8 @@
                                   :on-export (fn [] (when (:cur @st/state) (swap! st/state assoc :exporting true)))})
         toast     (toast-node)
         stack     (StackPane.)
-        root      (doto (BorderPane.) (.setTop (:node header)) (.setCenter stack) (.setFocusTraversable true))
+        prev-focus (atom nil)
+        root      (doto (BorderPane.) (.setTop (:node header)) (.setCenter stack))
         scene     (Scene. root 1440 900)]
     (.add (.getStylesheets scene) (theme/stylesheet-url))
     (reset! import! #(import-dialog! (.getWindow scene)))
@@ -126,6 +136,11 @@
                         (.setPadding (:node develop) (Insets. (max 12 (min 24 (* 0.016 wd))) (max 12 (min 40 (* 0.024 wd)))
                                                               (max 12 (min 24 (* 0.016 wd))) (max 12 (min 40 (* 0.024 wd)))))))))
     (install-shortcuts! scene {:import! (fn [] (@import!))})
+    ;; focus-visible: rings only while the keyboard is in use
+    (.addEventFilter scene KeyEvent/KEY_PRESSED
+                     (w/handler (fn [_] (w/set-classes! root "kbd" true))))
+    (.addEventFilter scene javafx.scene.input.MouseEvent/MOUSE_PRESSED
+                     (w/handler (fn [_] (w/set-classes! root "kbd" false))))
     (let [refresh!
           (fn [old s]
             (let [lib? (= :library (:view s)) dev? (= :develop (:view s))]
@@ -133,6 +148,15 @@
               (.setVisible (:node develop) dev?) (.setManaged (:node develop) dev?)
               ((:refresh! header) s)
               ((:refresh! export) s)
+              ;; modal export: nothing behind it can take focus; focus returns afterwards
+              (when (not= (boolean (:exporting old)) (boolean (:exporting s)))
+                (let [open? (boolean (:exporting s))]
+                  (doseq [^Node n [(:node header) (:node library) (:node develop)]] (.setDisable n open?))
+                  (if open?
+                    (do (reset! prev-focus (.getFocusOwner scene))
+                        (Platform/runLater #((:focus-first! export))))
+                    (Platform/runLater #(let [^Node f @prev-focus]
+                                          (when (and f (.getScene f) (not (.isDisabled f))) (.requestFocus f)))))))
               (when lib? ((:refresh! library) s))
               (when dev?  ((:refresh! develop) s))
               ;; library thumbnails size
@@ -162,8 +186,7 @@
                   (st/load-catalog!)
                   (when file (st/open-file! file))
                   (.show stage)
-                  ;; no button should start focused (it would show a focus ring)
-                  (Platform/runLater #(.requestFocus (.getRoot scene)))))]
+                  ))]
     (try
       (Platform/startup ^Runnable open!)
       (catch IllegalStateException _ (Platform/runLater open!)))))

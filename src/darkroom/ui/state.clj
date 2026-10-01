@@ -111,6 +111,20 @@
                 (let [k (max 0 (.indexOf ^java.util.List fs (:cur st)))]
                   (assoc st :cur (fs (mod (+ k d) (count fs))))))))))
 
+(defn move!
+  "Library keyboard navigation: moves the selection `n` frames through the
+  *visible* (filtered) frames, stopping at the ends. Frames are laid out in a
+  grid, so Up/Down pass the column count."
+  [n]
+  (swap! state
+         (fn [st]
+           (let [vis (visible-frames st)]
+             (if (empty? vis)
+               st
+               (let [k (.indexOf ^java.util.List vis (:cur st))
+                     k (if (neg? k) 0 (max 0 (min (dec (count vis)) (+ k n))))]
+                 (assoc st :cur (vis k))))))))
+
 (defn select-shoot! [id]
   (swap! state
          (fn [st]

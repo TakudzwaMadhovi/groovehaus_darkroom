@@ -18,9 +18,13 @@
   (.setGraphic b (w/hbox 8
                          (doto (w/label (theme/tracked text :normal) "sys")
                            (.setStyle (if (.contains (.getStyleClass b) "fill-sun") "-fx-text-fill: #000;" "")))
-                         (doto (w/label (theme/tracked hint :normal) "sys") (.setOpacity 0.5)
-                           (.setStyle (if (.contains (.getStyleClass b) "fill-sun") "-fx-text-fill: #000;" "")))))
+                         (doto (w/label (theme/tracked hint :normal) "sys")
+                           ;; shortcut hint: still >= 4.5:1 (bone .6 on black; black .72 on sun)
+                           (.setStyle (if (.contains (.getStyleClass b) "fill-sun") "-fx-text-fill: rgba(0,0,0,0.72);" "-fx-text-fill: rgba(242,233,213,0.6);")))))
   (.setContentDisplay b javafx.scene.control.ContentDisplay/GRAPHIC_ONLY)
+  (w/a11y! b (str (case text "IMPORT +" "Import images" "EXPORT \u2193" "Export the current photo" text)
+                  ", shortcut " (if (.contains (.toLowerCase (System/getProperty "os.name" "")) "mac") "Command " "Control ")
+                  (subs hint 1)))
   b)
 
 (defn create
@@ -48,5 +52,5 @@
     {:node grid
      :grid grid
      :refresh! (fn [s]
-                 (w/set-classes! lib "on" (= :library (:view s)))
-                 (w/set-classes! dev "on" (= :develop (:view s))))}))
+                 (w/set-on! lib (= :library (:view s)))
+                 (w/set-on! dev (= :develop (:view s))))}))

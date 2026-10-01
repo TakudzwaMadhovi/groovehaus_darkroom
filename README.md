@@ -50,6 +50,29 @@ Shortcuts: `⌘I` import · `⌘E`/`E` export · `Esc` close · `\` hold = befor
 | `darkroom.ui.header` / `library` / `develop` / `curve` / `export-overlay` / `app` | Views and wiring |
 | `darkroom.ui.canvas` / `thumbs` | Background loading, rendering and thumbnail caches |
 
+## Accessibility
+
+- **Keyboard:** everything is reachable with Tab. Focus rings show only while the
+  keyboard is in use (like `:focus-visible`). Library tiles take arrow keys (Up/Down
+  move by row), Space selects, Enter opens. The tone curve takes Left/Right (choose
+  a point), Up/Down (1%, Shift 5%, PageUp/PageDown 10%), Home/End, Backspace (reset).
+  Lists that rebuild (tiles, shoots, filmstrip, history, crop pills) keep keyboard focus.
+  The export dialog is modal: focus moves in, nothing behind it is reachable, `Esc`
+  closes it and focus returns.
+- **Screen readers:** every control has a plain-text accessible name (tracked labels
+  are announced without the letter-spacing characters), toggles announce
+  ", selected", tiles announce name, position, rating and edited state, photos have
+  alt text, the curve announces the point and its value. JavaFX exposes this to
+  VoiceOver (macOS) and Narrator/NVDA (Windows).
+- **Contrast:** all text is at least WCAG AA 4.5:1. The handoff's 50-55% bone text
+  was raised to 60% (>= 5.3:1 on every surface); `test/darkroom/ui/contrast_test.clj`
+  checks the stylesheet.
+- **Audit:** `xvfb-run -a lein run -m clojure.main scripts/a11y_audit.clj <folder>` walks the
+  live scene and exercises the keyboard behaviour above.
+- **Known limits:** JavaFX has no live regions, so the toast (e.g. "EXPORTED") is not
+  announced; the star and filter chips keep the design's 36 px targets; not tested
+  with VoiceOver/Narrator.
+
 ## Performance notes
 
 - Sliders re-render a downscaled working copy (1400 px, 2000 px on Retina) off the UI

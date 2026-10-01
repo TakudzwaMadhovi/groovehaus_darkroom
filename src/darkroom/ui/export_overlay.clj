@@ -112,29 +112,37 @@
               (.setPadding (Insets. 20 0 0 0))
               (.setStyle "-fx-border-color: rgba(242,233,213,0.14) transparent transparent transparent; -fx-border-width: 1 0 0 0;")))
     (w/add! scrim card)
+    (.setAccessibleText card "Export dialog")
+    (.setAccessibleText choose "Choose export folder")
     {:node scrim
+     :focus-first! (fn [] (when-let [b (first (.getChildren (first (.getChildren fmt-box))))] (.requestFocus b)))
      :refresh!
      (fn [s]
        (let [open? (boolean (:exporting s))]
          (.setVisible scrim open?) (.setManaged scrim open?)
          (when (and open? (:cur s))
            (.setText title (cat/frame-name (:cur s)))
-           (w/clear! fmt-box)
-           (w/add! fmt-box
-                   (let [fp (FlowPane. 8.0 8.0)]
-                     (doseq [f [:jpeg :png]]
-                       (let [b (w/pill (.toUpperCase (name f)) (fn [] (swap! st/state assoc :fmt f)))]
-                         (w/set-classes! b "on" (= f (:fmt s)))
-                         (.add (.getChildren fp) b)))
-                     fp))
-           (w/clear! size-box)
-           (w/add! size-box
-                   (let [fp (FlowPane. 8.0 8.0)]
-                     (doseq [[v l] [[1080 "1080 PX"] [2048 "2048 PX"] [0 "FULL RES"]]]
-                       (let [b (w/pill l (fn [] (swap! st/state assoc :size v)))]
-                         (w/set-classes! b "on" (= v (:size s)))
-                         (.add (.getChildren fp) b)))
-                     fp))
+           (w/keep-focus! fmt-box
+                          (fn []
+                            (w/clear! fmt-box)
+                            (w/add! fmt-box
+                                    (let [fp (FlowPane. 8.0 8.0)]
+                                      (doseq [f [:jpeg :png]]
+                                        (let [b (w/pill (.toUpperCase (name f)) (fn [] (swap! st/state assoc :fmt f)))]
+                                          (w/set-on! b (= f (:fmt s)))
+                                          (.add (.getChildren fp) b)))
+                                      fp))))
+           (w/keep-focus! size-box
+                          (fn []
+                            (w/clear! size-box)
+                            (w/add! size-box
+                                    (let [fp (FlowPane. 8.0 8.0)]
+                                      (doseq [[v l] [[1080 "1080 PX"] [2048 "2048 PX"] [0 "FULL RES"]]]
+                                        (let [b (w/pill l (fn [] (swap! st/state assoc :size v)))]
+                                          (w/set-base-a11y! b (if (zero? v) "Full resolution" (str "Long edge " v " pixels")))
+                                          (w/set-on! b (= v (:size s)))
+                                          (.add (.getChildren fp) b)))
+                                      fp))))
            (let [^Pane qn (:node q-row)]
              (.setVisible qn (= :jpeg (:fmt s))) (.setManaged qn (= :jpeg (:fmt s))))
            (let [d (start-dir s)]
