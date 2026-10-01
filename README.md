@@ -181,6 +181,12 @@ file that has a sidecar reads it. Another program's tone settings are not transl
 into this app's sliders. Thumbnails are cached on disk (`thumbs/` in the data folder) keyed
 by path, modification time and size.
 
+## Phone companion and catalog sync
+
+**Phone companion (opt-in).** `PHONE` in the Library starts a small web server on this computer and shows a QR code. Scan it on a phone on the same Wi-Fi to browse the grid, view previews, and set rating, flag and colour label. The address carries a random 128-bit token that is exchanged for an HttpOnly, SameSite=Strict cookie; changes are form POSTs that require an `X-Requested-With` header. No file paths are exposed (frames use opaque ids). It is plain HTTP on the LAN, so use it only on a network you trust; stop it with the same pill. The QR code uses ZXing (`com.google.zxing/core`).
+
+**WebDAV catalog sync.** `UPLOAD`/`DOWNLOAD` in the Library push or pull the catalog file to a WebDAV URL (Nextcloud, ownCloud, any DAV server). Uploads use `If-Match`/`If-None-Match` with the ETag; if the remote changed since your last sync the server answers 412 and nothing is overwritten. There is no automatic merge: you choose to download (the local catalog is first backed up as `catalog-before-pull-<ms>.edn`) or to upload deliberately. The path map (`local-prefix=remote-prefix`) rewrites image folders between computers. Machine-specific settings (sync, lens database, camera profiles, segmentation model) are never synced. The password is held in memory only. Image files themselves are not synced.
+
 ## Layout
 
 | Namespace | Role |

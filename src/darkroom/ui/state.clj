@@ -24,6 +24,7 @@
     :sel       set of multi-selected frames (library); actions use `selection`
     :clipboard settings copied with copy-settings!
     :watch     folder being watched for new frames (hot folder), or nil
+    :remote-url address of the phone companion while it is on, else nil
     :meta-rev  bumped when camera metadata finishes loading (re-sorts/re-searches)"
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
@@ -32,13 +33,20 @@
             [darkroom.imaging.camera :as camera]
             [darkroom.imaging.combine :as combine]
             [darkroom.imaging.exif :as exif]
+            [darkroom.imaging.export :as export]
+            [darkroom.imaging.loader :as loader]
+            [darkroom.imaging.pipeline :as pipeline]
+            [darkroom.imaging.scene :as scene]
+            [darkroom.imaging.thumbcache :as thumbcache]
             [darkroom.imaging.lens :as lens]
             [darkroom.imaging.local :as local]
             [darkroom.imaging.mask :as mask]
             [darkroom.imaging.paths :as paths]
             [darkroom.imaging.watch :as watch]
             [darkroom.imaging.xmp :as xmp]
-            [darkroom.plugin :as plugin])
+            [darkroom.plugin :as plugin]
+            [darkroom.remote :as remote]
+            [darkroom.sync :as sync])
   (:import (java.io File)
            (javafx.application Platform)
            (java.util.concurrent Executors ScheduledExecutorService ScheduledFuture ThreadFactory TimeUnit)))
@@ -624,6 +632,171 @@
   (when (:lens-profile (cur-adj @state))
     (set-adj! :lens-profile nil)
     (commit! "LENS PROFILE OFF")))
+
+;; ------------------------------------------------------- phone companion
+
+(defn- frame-id [path]
+  (let [d (.digest (java.security.MessageDigest/getInstance "SHA-1") (.getBytes (str path) "UTF-8"))]
+    (apply str (map #(format "%02x" (bit-and (long %) 0xff)) (take 6 d)))))
+
+(defn- path-of-id
+  "The frame whose opaque id is `id` (nothing outside the catalog can be reached)."
+  [id]
+  (let [c (:catalog @state)]
+    (first (filter #(= id (frame-id %)) (distinct (concat (mapcat :paths (:shoots c)) (keys (:frames c))))))))
+
+(defn- frame-json [c p]
+  {:id (frame-id p) :name (cat/frame-name p) :rating (cat/rating c p) :colour (some-> (cat/colour c p) name)
+   :reject (cat/rejected? c p) :edited (boolean (cat/edited? c p))})
+
+(defonce ^:private remote-previews (atom {:order [] :v {}}))
+
+(defn- cached-bytes [k f]
+  (or (get-in @remote-previews [:v k])
+      (let [b (f)]
+        (swap! remote-previews (fn [{:keys [order v]}]
+                                 (let [order (conj (vec (remove #{k} order)) k) n (max 0 (- (count order) 24))]
+                                   {:order (vec (drop n order)) :v (apply dissoc (assoc v k b) (take n order))})))
+        b)))
+
+(defonce ^:private preview-lock (Object.))
+
+(defn- render-preview-bytes
+  "JPEG of the developed frame, long edge about 1600 px (one at a time: it is heavy)."
+  [path adj]
+  (locking preview-lock
+    (let [source (loader/load-scene path adj)
+          small (scene/fit source 1600)
+          scale (/ (double (:width small)) (double (:width source)))
+          out (pipeline/render small adj {:quality :preview :scale scale})]
+      (export/jpeg-bytes (scene/->argb out :srgb) 0.85))))
+
+(defn remote-backend
+  "The functions the phone companion server (darkroom.remote) calls: they read
+  and change the catalog, and render thumbnails and previews of its frames."
+  []
+  {:shoots (fn [] (mapv (fn [sh] {:id (:id sh) :name (:name sh) :count (count (:paths sh))}) (:shoots (:catalog @state))))
+   :frames (fn [sid] (when-let [sh (cat/shoot (:catalog @state) sid)]
+                       (let [c (:catalog @state)] (mapv #(frame-json c %) (:paths sh)))))
+   :thumb (fn [id] (when-let [p (path-of-id id)]
+                     (cached-bytes [:thumb p (.lastModified (File. (paths/source-file p)))]
+                                   #(export/jpeg-bytes (thumbcache/thumbnail (File. (cat/app-dir) "thumbs") p 480 browser/thumbnail) 0.8))))
+   :preview (fn [id] (when-let [p (path-of-id id)]
+                       (let [adj (cat/adj (:catalog @state) p)]
+                         (cached-bytes [:preview p adj] #(render-preview-bytes p adj)))))
+   :update (fn [id {:keys [rating reject colour] :as change}]
+             (when-let [p (path-of-id id)]
+               (update-catalog!
+                 (fn [c]
+                   (cond-> c
+                     (contains? change :rating) (cat/assign-rating p rating)
+                     (and (contains? change :reject) (not= (boolean reject) (cat/rejected? c p))) (cat/toggle-reject p)
+                     (contains? change :colour) (as-> c2 (let [cur (cat/colour c2 p)]
+                                                           (cond (= cur colour) c2
+                                                                 (nil? colour) (cat/set-colour c2 p cur) ; same colour again clears
+                                                                 :else (cat/set-colour c2 p colour)))))))
+               (frame-json (:catalog @state) p)))})
+
+(defonce ^:private remote-server (atom nil))
+
+(defn remote-running? [] (boolean @remote-server))
+
+(defn stop-remote!
+  "Switches the phone companion off."
+  []
+  (when-let [{:keys [stop!]} @remote-server] (reset! remote-server nil) (stop!))
+  (swap! state assoc :remote-url nil))
+
+(defn start-remote!
+  "Switches the phone companion on (see darkroom.remote for what it exposes) and
+  returns its address, which is also put in the state as :remote-url."
+  []
+  (stop-remote!)
+  (let [srv (remote/start! (remote-backend))]
+    (reset! remote-server srv)
+    (swap! state assoc :remote-url (:url srv))
+    (:url srv)))
+
+;; ------------------------------------------------------------------ sync
+
+(defonce sync-password (atom ""))   ; kept in memory only, never written to the catalog
+
+(defn sync-config
+  "{:url :user :etag :path-map} of the catalog's WebDAV sync (empty when unset)."
+  []
+  (:sync (:catalog @state)))
+
+(defn parse-path-map
+  "\"/Users/me/Photos=D:/Photos; /a=/b\" -> [[\"/Users/me/Photos\" \"D:/Photos\"] [\"/a\" \"/b\"]]."
+  [text]
+  (vec (for [part (str/split (str text) #";")
+             :let [[from to] (map str/trim (str/split part #"=" 2))]
+             :when (and (not (str/blank? from)) (not (str/blank? to)))]
+         [from to])))
+
+(defn set-sync!
+  "Remembers the sync folder URL, user name and path map (not the password). Changing the URL forgets the ETag."
+  [url user path-map-text]
+  (update-catalog! (fn [c]
+                     (let [old (:sync c)]
+                       (assoc c :sync (assoc old :url (str/trim (str url)) :user (str/trim (str user))
+                                                 :path-map (parse-path-map path-map-text)
+                                                 :etag (when (= (str/trim (str url)) (:url old)) (:etag old))))))))
+
+(defonce ^:private sync-worker
+  (Executors/newSingleThreadExecutor
+    (reify ThreadFactory (newThread [_ r] (doto (Thread. ^Runnable r "darkroom-sync") (.setDaemon true))))))
+
+(defn- sync-conn [] (assoc (sync-config) :password @sync-password))
+
+(defn- sync-failed [^Throwable t]
+  (run-ui! #(toast! (case (:kind (ex-data t))
+                      :conflict "REMOTE CATALOG CHANGED — PULL FIRST"
+                      (str "SYNC FAILED — " (str/upper-case (str (.getMessage t))))))))
+
+(defn sync-push!
+  "Uploads the catalog (without this computer's own settings, photo paths rewritten by the path map)."
+  []
+  (if (str/blank? (:url (sync-config)))
+    (toast! "SET THE SYNC FOLDER ADDRESS FIRST")
+    (let [conn (sync-conn)
+          text (cat/catalog-text (cat/rewrite-paths (apply dissoc (:catalog @state) cat/machine-keys) (:path-map conn)))]
+      (toast! "UPLOADING CATALOG…")
+      (.execute sync-worker
+                (fn []
+                  (try (let [{:keys [etag]} (sync/push! conn text)]
+                         (run-ui! #(do (update-catalog! assoc-in [:sync :etag] etag) (toast! "CATALOG UPLOADED"))))
+                       (catch Throwable t (sync-failed t))))))))
+
+(defn sync-pull!
+  "Downloads the remote catalog and replaces this one (this computer's own
+  settings are kept; the old catalog is saved as catalog-before-pull-<time>.edn in the data folder)."
+  []
+  (if (str/blank? (:url (sync-config)))
+    (toast! "SET THE SYNC FOLDER ADDRESS FIRST")
+    (let [conn (sync-conn)]
+      (toast! "DOWNLOADING CATALOG…")
+      (.execute sync-worker
+                (fn []
+                  (try
+                    (if-let [{:keys [text etag]} (sync/pull! conn)]
+                      (if-let [remote (cat/parse-text text)]
+                        (run-ui!
+                          (fn []
+                            (let [old (:catalog @state)
+                                  backup (File. (.getParentFile ^File @catalog-file) (str "catalog-before-pull-" (System/currentTimeMillis) ".edn"))
+                                  inverse (mapv (fn [[a b]] [b a]) (:path-map conn))
+                                  new (-> remote (cat/rewrite-paths inverse)
+                                          (merge (select-keys old cat/machine-keys))
+                                          (assoc-in [:sync :etag] etag))
+                                  shoot (or (some #(when (= (:shoot @state) (:id %)) %) (:shoots new)) (first (:shoots new)))]
+                              (try (cat/save! old backup) (catch Throwable _ nil))
+                              (swap! state assoc :catalog new :shoot (:id shoot) :cur (first (:paths shoot)) :sel #{})
+                              (save-soon!)
+                              (toast! "CATALOG DOWNLOADED (OLD ONE BACKED UP)"))))
+                        (run-ui! #(toast! "THE CATALOG ON THE SERVER IS NOT READABLE")))
+                      (run-ui! #(toast! "NOTHING ON THE SERVER YET — UPLOAD FIRST")))
+                    (catch Throwable t (sync-failed t))))))))
 
 ;; ------------------------------------------------------ HDR merge / panorama
 

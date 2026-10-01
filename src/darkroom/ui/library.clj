@@ -3,6 +3,7 @@
   status bar. Reads state, calls actions; owns no data."
   (:require [clojure.string :as str]
             [darkroom.catalog :as cat]
+            [darkroom.remote :as remote]
             [darkroom.ui.info :as info]
             [darkroom.ui.state :as st]
             [darkroom.ui.theme :as theme]
@@ -199,6 +200,13 @@
         toolbar2   (doto (FlowPane. 14.0 6.0) (.setAlignment Pos/CENTER_LEFT) (.setPadding (Insets. 6 24 6 24)))
         ;; metadata / actions panel
         info-panel (info/create)
+        phone-qr   (doto (ImageView.) (.setFitWidth 200.0) (.setFitHeight 200.0) (.setSmooth false))
+        phone-url  (doto (w/classes! (TextField.) "gh-input") (.setEditable false) (w/a11y! "Phone companion address"))
+        phone-box  (doto (w/vbox 8
+                                 phone-qr phone-url
+                                 (doto (w/label "scan with your phone's camera (same wi-fi). anyone on this network who has the address can rate and flag your photos: switch it off when done." "editorial")
+                                   (.setWrapText true) (.setStyle "-fx-font-size: 15px;")))
+                     (.setVisible false) (.setManaged false))
         act-pills  (let [fp (FlowPane. 8.0 8.0)
                          p  (fn [text f a11y] (doto (w/pill text f "xs") (w/set-base-a11y! a11y)))
                          n! (fn [n word] (st/toast! (str n " " word)))]
@@ -209,7 +217,27 @@
                              (p "REMOVE" (fn [] (when-let [n (st/remove-frames!)] (n! n "REMOVED FROM SHOOT"))) "Remove the selection from the shoot (files are kept)")
                              (p "WRITE XMP" (fn [] (n! (st/write-xmp!) "SIDECARS WRITTEN")) "Write XMP sidecars for the shoot")
                              (p "HDR MERGE" (fn [] (st/merge-hdr!)) "Merge the selected frames (an exposure bracket) into one HDR frame")
-                             (p "PANORAMA" (fn [] (st/stitch-panorama!)) "Stitch the selected frames into a panorama")))
+                             (p "PANORAMA" (fn [] (st/stitch-panorama!)) "Stitch the selected frames into a panorama")
+                             (doto (w/pill "PHONE" (fn [] (if (st/remote-running?) (st/stop-remote!) (st/start-remote!))) "xs")
+                               (w/set-base-a11y! "Switch the phone companion on or off: browse and rate from a phone on the same network"))))
+        ;; WebDAV catalog sync
+        mk-field   (fn [prompt a11y]
+                     (doto (w/classes! (TextField.) "gh-input") (.setPromptText prompt) (w/a11y! a11y)))
+        sync-url   (mk-field "https://server/remote.php/dav/files/me/groovehaus" "Sync folder address")
+        sync-user  (mk-field "user name" "Sync user name")
+        sync-pass  (doto (w/classes! (javafx.scene.control.PasswordField.) "gh-input") (.setPromptText "password (not saved)") (w/a11y! "Sync password"))
+        sync-map   (mk-field "this=shared; /Users/me/Photos=D:/Photos" "Photo path map (optional)")
+        sync-save! (fn [] (st/set-sync! (.getText sync-url) (.getText sync-user) (.getText sync-map)))
+        sync-box   (let [commit (fn [] (sync-save!) (reset! st/sync-password (.getText sync-pass)))]
+                     (doseq [^TextField f [sync-url sync-user sync-pass sync-map]]
+                       (.addListener (.focusedProperty f) (w/change-listener (fn [focused] (when-not focused (commit)))))
+                       (.setOnKeyPressed f (w/handler (fn [^KeyEvent e] (when (= (.getCode e) KeyCode/ENTER) (commit))))))
+                     (w/vbox 8 sync-url sync-user sync-pass sync-map
+                             (doto (FlowPane. 8.0 8.0)
+                               (w/add! (doto (w/pill "UPLOAD" (fn [] (commit) (st/sync-push!)) "xs")
+                                         (w/set-base-a11y! "Upload the catalog to the sync folder"))
+                                       (doto (w/pill "DOWNLOAD" (fn [] (commit) (st/sync-pull!)) "xs")
+                                         (w/set-base-a11y! "Download the catalog from the sync folder, replacing this one (the old one is backed up)"))))))
         side       (doto (VBox. 18.0) (.setPadding (Insets. 18 20 18 20)) (.setMinWidth 260) (.setPrefWidth 280))
         side-scroll (doto (ScrollPane. side) (.setFitToWidth true) (.setHbarPolicy ScrollPane$ScrollBarPolicy/NEVER)
                       (.setMinWidth 260) (.setPrefWidth 280) (.setMaxWidth 320))
@@ -275,7 +303,8 @@
     (apply w/add! toolbar2 search sort-btn dir-btn (concat (map colour-btns cat/colour-labels) [survey-btn watch-btn]))
     (w/classes! side-scroll "panel" "rule-left")
     (.setStyle side-scroll "-fx-background-color: transparent;")
-    (w/add! side (w/tlabel "INFO" :wide "sys" "dim") (:node info-panel) (w/tlabel "ACTIONS" :wide "sys" "dim") act-pills)
+    (w/add! side (w/tlabel "INFO" :wide "sys" "dim") (:node info-panel) (w/tlabel "ACTIONS" :wide "sys" "dim") act-pills phone-box
+            (w/tlabel "SYNC CATALOG (WEBDAV)" :wide "sys" "dim") sync-box)
     (w/classes! status "rule-top")
     (w/classes! scroll "ground")
     (.setStyle grid "-fx-background-color: transparent;")
@@ -357,6 +386,19 @@
              (.setStyle title "-fx-font-size: 34px;")))
          (let [t (str (:text (:query s)))]
            (when (and (not (.isFocused search)) (not= t (.getText search))) (.setText search t)))
+         (let [{:keys [url user path-map]} (:sync c)
+               put-text! (fn [^TextField f t] (when (and (not (.isFocused f)) (not= t (.getText f))) (.setText f t)))]
+           (put-text! sync-url (str url)) (put-text! sync-user (str user))
+           (put-text! sync-map (clojure.string/join "; " (map (fn [[a b]] (str a "=" b)) path-map))))
+         (let [url (:remote-url s) show? (boolean url)]
+           (.setVisible phone-box show?) (.setManaged phone-box show?)
+           (when (and url (not= url (.getText phone-url)))
+             (.setText phone-url url)
+             (let [{:keys [size on?]} (remote/qr url) k 6 n (* size k)
+                   img (javafx.scene.image.WritableImage. (int n) (int n))
+                   pw (.getPixelWriter img)]
+               (dotimes [y n] (dotimes [x n] (.setArgb pw x y (if (on? (quot x k) (quot y k)) (unchecked-int 0xFF000000) (unchecked-int 0xFFFFFFFF)))))
+               (.setImage phone-qr img))))
          (w/set-on! survey-btn (st/survey? s))
          (.setText watch-btn (theme/tracked (if (:watch s) "WATCHING ■" "WATCH FOLDER") :normal))
          (w/set-on! watch-btn (boolean (:watch s)))

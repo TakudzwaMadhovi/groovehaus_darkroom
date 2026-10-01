@@ -1,6 +1,7 @@
 (ns darkroom.ui.state-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [darkroom.catalog :as cat]
+            [darkroom.dav-fixture]
             [darkroom.dcp-fixture]
             [darkroom.imaging.core]
             [darkroom.imaging.exif]
@@ -450,3 +451,103 @@
     (st/set-camera-profile! (.getPath f))
     (is (= (.getPath f) (:camera-profile (st/cur-adj @st/state))))
     (st/remove-camera-profile! (.getPath f))))
+
+(defn- await-pred [pred ms]
+  (let [end (+ (System/currentTimeMillis) ms)]
+    (loop [] (cond (pred) true (> (System/currentTimeMillis) end) false :else (do (Thread/sleep 50) (recur))))))
+
+(deftest catalog-sync-round-trip-between-two-computers
+  (let [dav (darkroom.dav-fixture/start! {})
+        a-dir (tmp-dir) b-dir (tmp-dir)
+        pa (png! a-dir "one.png")]
+    (try
+      (reset! st/sync-password "p")
+      ;; computer A
+      (st/create-shoot! "TRIP" [pa])
+      (st/rate! 4)
+      (st/update-catalog! assoc :camera-profiles ["/only/on/a.dcp"])
+      (st/set-sync! (:url dav) "u" (str (.getPath a-dir) "=/Volumes/Photos"))
+      (is (= [[(.getPath a-dir) "/Volumes/Photos"]] (:path-map (st/sync-config))))
+      (st/sync-push!)
+      (is (await-pred #(:etag (st/sync-config)) 10000) "the upload finishes and records the server's version")
+      (let [remote (cat/parse-text (:body @(:state dav)))]
+        (is (= ["/Volumes/Photos/one.png"] (:paths (first (:shoots remote)))) "paths are written in the shared form")
+        (is (= 4 (cat/rating remote "/Volumes/Photos/one.png")))
+        (is (not-any? #(contains? remote %) cat/machine-keys) "nothing about computer A itself is shared"))
+      ;; computer B: another path for the same photos, its own settings
+      (reset! st/state initial)
+      (reset! st/catalog-file (java.io.File. b-dir "catalog.edn"))
+      (st/create-shoot! "OTHER" [])
+      (st/update-catalog! assoc :camera-profiles ["/only/on/b.dcp"])
+      (st/set-sync! (:url dav) "u" (str (.getPath b-dir) "=/Volumes/Photos"))
+      (st/sync-pull!)
+      (is (await-pred #(= ["TRIP"] (mapv :name (:shoots (:catalog @st/state)))) 10000) "the shoot arrived")
+      (let [c (:catalog @st/state) bp (str (.getPath b-dir) "/one.png")]
+        (is (= [bp] (:paths (first (:shoots c)))) "paths mapped to this computer")
+        (is (= 4 (cat/rating c bp)))
+        (is (= ["/only/on/b.dcp"] (:camera-profiles c)) "its own settings survived")
+        (is (some? (:etag (:sync c))))
+        (is (some #(re-find #"^catalog-before-pull-" (.getName %)) (.listFiles b-dir)) "the old catalog was kept"))
+      ;; B changes something and pushes with the right base: fine; A still has the old base: conflict
+      (st/update-catalog! (fn [c] (cat/assign-rating c (str (.getPath b-dir) "/one.png") 2)))
+      (st/sync-push!)
+      (is (await-pred #(= 2 (cat/rating (cat/parse-text (:body @(:state dav))) "/Volumes/Photos/one.png")) 10000))
+      (reset! st/state initial)
+      (st/create-shoot! "A AGAIN" [])
+      (st/set-sync! (:url dav) "u" "")
+      (st/update-catalog! assoc-in [:sync :etag] "\"v1\"")        ; stale base
+      (st/sync-push!)
+      (is (await-pred #(= "REMOTE CATALOG CHANGED — PULL FIRST" (:msg (:toast @st/state))) 10000))
+      (finally ((:stop! dav)) (reset! st/sync-password "")))))
+
+(deftest sync-needs-an-address-and-parses-path-maps
+  (shoot-with "a.png")
+  (st/sync-push!)
+  (is (= "SET THE SYNC FOLDER ADDRESS FIRST" (:msg (:toast @st/state))))
+  (is (= [["/a" "/b"] ["C:/x" "D:/y"]] (st/parse-path-map " /a = /b ; C:/x=D:/y ; ; broken ")))
+  (is (= [] (st/parse-path-map ""))))
+
+(deftest phone-companion-reads-and-rates-through-the-catalog
+  (let [d (tmp-dir) p (png! d "pic.png")
+        http (fn [method url & {:keys [body headers]}]
+               (let [c (-> (java.net.http.HttpClient/newBuilder) (.followRedirects java.net.http.HttpClient$Redirect/NEVER) .build)
+                     b (java.net.http.HttpRequest/newBuilder (java.net.URI/create url))]
+                 (doseq [[k v] headers] (.header b k v))
+                 (.method b method (if body (java.net.http.HttpRequest$BodyPublishers/ofString body) (java.net.http.HttpRequest$BodyPublishers/noBody)))
+                 (let [r (.send c (.build b) (java.net.http.HttpResponse$BodyHandlers/ofByteArray))]
+                   {:status (.statusCode r) :body (.body r)})))]
+    (st/create-shoot! "PHONE" [p])
+    (st/start-remote!)
+    (try
+      (is (st/remote-running?))
+      (let [url (:remote-url @st/state)
+            [_ port token] (re-find #":(\d+)/\?t=([0-9a-f]{32})$" url)
+            base (str "http://127.0.0.1:" port)
+            h {"Cookie" (str "gh=" token)}
+            txt #(String. ^bytes (:body %) "UTF-8")]
+        (is (= 403 (:status (http "GET" (str base "/api/shoots")))) "no token, no access")
+        (let [shoots (txt (http "GET" (str base "/api/shoots") :headers h))]
+          (is (re-find #"\"name\":\"PHONE\",\"count\":1" shoots)))
+        (let [sid (:id (first (:shoots (:catalog @st/state))))
+              fs (txt (http "GET" (str base "/api/shoot/" sid) :headers h))
+              fid (second (re-find #"\"id\":\"([0-9a-f]{12})\"" fs))]
+          (is (re-find #"\"name\":\"PIC\"" fs))
+          (is (not (re-find #"darkroom-state" fs)) "no file paths in the listing")
+          (let [thumb (http "GET" (str base "/api/thumb/" fid) :headers h)]
+            (is (= 200 (:status thumb)))
+            (is (= [-1 -40] (take 2 (:body thumb))) "a JPEG"))
+          (let [prev (http "GET" (str base "/api/preview/" fid) :headers h)]
+            (is (= 200 (:status prev))) (is (= [-1 -40] (take 2 (:body prev)))))
+          (is (= 404 (:status (http "GET" (str base "/api/thumb/ffffffffffff") :headers h))) "only catalog frames can be reached")
+          (let [r (http "POST" (str base "/api/frame/" fid) :headers (assoc h "X-Requested-With" "gh") :body "rating=4&colour=green&reject=1")]
+            (is (= 200 (:status r)))
+            (is (= 4 (cat/rating (:catalog @st/state) p)))
+            (is (= :green (cat/colour (:catalog @st/state) p)))
+            (is (cat/rejected? (:catalog @st/state) p)))
+          (http "POST" (str base "/api/frame/" fid) :headers (assoc h "X-Requested-With" "gh") :body "colour=&reject=0&rating=0")
+          (is (nil? (cat/colour (:catalog @st/state) p)))
+          (is (not (cat/rejected? (:catalog @st/state) p)))
+          (is (= 0 (cat/rating (:catalog @st/state) p)))))
+      (finally (st/stop-remote!)))
+    (is (not (st/remote-running?)))
+    (is (nil? (:remote-url @st/state)))))

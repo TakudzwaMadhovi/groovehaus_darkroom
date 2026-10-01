@@ -510,6 +510,33 @@
                     (into-array java.nio.file.CopyOption [StandardCopyOption/REPLACE_EXISTING]))
         (finally (Files/deleteIfExists (.toPath tmp)))))))
 
+(defn catalog-text
+  "The catalog as EDN text, the form `save!` writes."
+  ^String [catalog]
+  (binding [*print-length* nil *print-level* nil] (pr-str catalog)))
+
+(defn parse-text
+  "A catalog from EDN text, or nil when the text is not a catalog."
+  [^String text]
+  (try (let [c (edn/read-string text)]
+         (when (and (map? c) (vector? (:shoots c)) (map? (:frames c))) c))
+       (catch Exception _ nil)))
+
+(def machine-keys
+  "Catalog entries that describe this computer, not the photographs: left out of
+  a synced catalog and kept across a pull."
+  [:sync :lens-db-dir :camera-profiles :segment-model])
+
+(defn rewrite-paths
+  "The catalog with every photo path (shoot lists and frame keys, virtual copies
+  included) rewritten by the first matching [from to] prefix pair of
+  `path-map`; paths matching none are kept."
+  [catalog path-map]
+  (let [re (fn [^String p] (or (some (fn [[from to]] (when (.startsWith p ^String from) (str to (subs p (count from))))) path-map) p))]
+    (-> catalog
+        (update :shoots (fn [shoots] (mapv (fn [sh] (update sh :paths #(mapv re %))) shoots)))
+        (update :frames (fn [fs] (into {} (map (fn [[k v]] [(re k) v]) fs)))))))
+
 (defn load!
   "Reads a catalog; a missing or unreadable file yields the empty catalog
   (an unreadable one is first copied aside as catalog.edn.bad)."

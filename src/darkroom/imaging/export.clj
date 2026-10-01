@@ -252,6 +252,23 @@
             (Files/move (.toPath named) (.toPath tmp) (into-array java.nio.file.CopyOption [StandardCopyOption/REPLACE_EXISTING]))
             (finally (.close mat) (Files/deleteIfExists (.toPath named)))))))))
 
+(defn jpeg-bytes
+  "JPEG file bytes of a packed-ARGB image map at `quality` (0-1), no metadata."
+  ^bytes [img quality]
+  (let [^BufferedImage buf (->buffered img true)
+        ^ImageWriter w (.next (ImageIO/getImageWritersByFormatName "jpeg"))
+        out (java.io.ByteArrayOutputStream.)]
+    (try
+      (with-open [os (ImageIO/createImageOutputStream out)]
+        (.setOutput w os)
+        (let [param (.getDefaultWriteParam w)]
+          (.setCompressionMode param ImageWriteParam/MODE_EXPLICIT)
+          (.setCompressionType param (first (.getCompressionTypes param)))
+          (.setCompressionQuality param (float quality))
+          (.write w nil (IIOImage. buf nil nil) param)))
+      (.toByteArray out)
+      (finally (.dispose w)))))
+
 (defn save-scene!
   "Renders the float scene image `sc` into the output colour `space` (:srgb,
   :display-p3 or :adobe-rgb, default :srgb), embeds its ICC profile, and saves

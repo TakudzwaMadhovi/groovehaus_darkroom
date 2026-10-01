@@ -34,6 +34,7 @@
                  ~['org.openjfx/javafx-graphics javafx-version :classifier javafx-platform]
                  ~['org.openjfx/javafx-controls javafx-version :classifier javafx-platform]
                  [com.drewnoakes/metadata-extractor "2.19.0"] ; EXIF orientation
+                 [com.google.zxing/core "3.5.3"]               ; QR code for the phone companion address
                  [org.bytedeco/javacpp ~bytedeco-version]
                  ~['org.bytedeco/javacpp bytedeco-version :classifier bytedeco-platform]
                  [org.bytedeco/opencv ~opencv-version]
