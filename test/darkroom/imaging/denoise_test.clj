@@ -82,40 +82,44 @@
 
 ;; --- pipeline: stage caching ------------------------------------------------
 
+(defn- spy-stage [calls id ks & [{:keys [quality?]}]]
+  {:id id :keys ks :quality? quality?
+   :neutral? (fn [s] (every? #(zero? (long (get s % 0))) ks))
+   :op (fn [img s opts] (swap! calls conj (if quality? [id (:quality opts)] id)) img)})
+
 (deftest renderer-skips-unchanged-stages
-  (let [calls (atom [])
-        spy   (fn [k] (fn [img v & _] (swap! calls conj k) img))
-        ops   [{:key :denoise :op (spy :denoise) :neutral 0 :opts? true}
-               {:key :brightness :op (spy :brightness) :neutral 0}
-               {:key :contrast :op (spy :contrast) :neutral 0}]
-        src   (scene 8 8)]
-    (with-redefs [pipeline/operations ops]
+  (let [calls  (atom [])
+        stages [(spy-stage calls :denoise [:denoise])
+                (spy-stage calls :geometry [:angle])
+                (spy-stage calls :tone [:exposure :contrast])]
+        src    (scene 8 8)]
+    (with-redefs [pipeline/stages stages
+                  pipeline/default-settings {:denoise 0 :angle 0 :exposure 0 :contrast 0}]
       (let [r (pipeline/renderer src)]
-        (r {:denoise 50 :brightness 10 :contrast 5})
-        (is (= [:denoise :brightness :contrast] @calls) "first render runs everything")
+        (r {:denoise 50 :angle 2 :exposure 1 :contrast 5})
+        (is (= [:denoise :geometry :tone] @calls) "first render runs everything")
         (reset! calls [])
-        (r {:denoise 50 :brightness 20 :contrast 5})
-        (is (= [:brightness :contrast] @calls) "brightness change must not re-run denoise")
+        (r {:denoise 50 :angle 2 :exposure 2 :contrast 5})
+        (is (= [:tone] @calls) "a tone change must not re-run denoise or geometry")
         (reset! calls [])
-        (r {:denoise 50 :brightness 20 :contrast 9})
-        (is (= [:contrast] @calls) "only the last stage re-runs")
+        (r {:denoise 50 :angle 3 :exposure 2 :contrast 5})
+        (is (= [:geometry :tone] @calls) "a geometry change re-runs geometry and tone only")
         (reset! calls [])
-        (r {:denoise 50 :brightness 20 :contrast 9})
+        (r {:denoise 50 :angle 3 :exposure 2 :contrast 5})
         (is (= [] @calls) "identical request is fully cached")
-        (r {:denoise 60 :brightness 20 :contrast 9})
-        (is (= [:denoise :brightness :contrast] @calls) "changing denoise re-runs everything after it")))))
+        (r {:denoise 60 :angle 3 :exposure 2 :contrast 5})
+        (is (= [:denoise :geometry :tone] @calls) "changing denoise re-runs everything after it")))))
 
 (deftest renderer-quality-caching
-  (let [calls (atom [])
-        op    (fn [img v opts] (swap! calls conj (:quality opts)) img)
-        ops   [{:key :denoise :op op :neutral 0 :opts? true}]
-        src   (scene 8 8)]
-    (with-redefs [pipeline/operations ops]
+  (let [calls  (atom [])
+        stages [(spy-stage calls :denoise [:denoise] {:quality? true})]
+        src    (scene 8 8)]
+    (with-redefs [pipeline/stages stages pipeline/default-settings {:denoise 0}]
       (let [r (pipeline/renderer src)]
         (r {:denoise 50} {:quality :draft})
         (r {:denoise 50} {:quality :draft})
-        (is (= [:draft] @calls) "same quality is cached")
+        (is (= [[:denoise :draft]] @calls) "same quality is cached")
         (r {:denoise 50} {:quality :preview})
-        (is (= [:draft :preview] @calls) "higher quality request recomputes")
+        (is (= [[:denoise :draft] [:denoise :preview]] @calls) "higher quality request recomputes")
         (r {:denoise 50} {:quality :draft})
-        (is (= [:draft :preview] @calls) "a cached higher-quality result satisfies a draft request")))))
+        (is (= 2 (count @calls)) "a cached higher-quality result satisfies a draft request")))))

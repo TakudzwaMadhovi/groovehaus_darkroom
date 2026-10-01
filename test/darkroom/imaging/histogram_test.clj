@@ -22,7 +22,7 @@
 (deftest tracks-adjustments
   (let [i (img (px 100 100 100) (px 100 100 100))
         before (h/compute i)
-        after  (h/compute (pipeline/render i {:brightness 20}))]
+        after  (h/compute (pipeline/render i {:exposure 0.5}))]
     (is (= 2 (aget ^longs (:r before) 100)))
     (is (= 0 (aget ^longs (:r after) 100)))
-    (is (= 2 (aget ^longs (:r after) 151)))))
+    (is (= 2 (aget ^longs (:r after) 141)))))

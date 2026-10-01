@@ -24,7 +24,7 @@
 (deftest pipeline-render
   (let [i (img (px 255 100 100 100))]
     (is (identical? i (pipeline/render i pipeline/default-settings)))
-    (is (not= (first-px i) (first-px (pipeline/render i {:brightness 20}))))))
+    (is (not= (first-px i) (first-px (pipeline/render i {:exposure 0.5}))))))
 
 (deftest fit-downscale
   (let [big (core/image 4 4 (int-array (repeat 16 (px 255 100 50 10))))
@@ -83,6 +83,6 @@
 
 (deftest pipeline-all-settings
   (let [i (img (px 255 100 150 200))
-        o (pipeline/render i {:brightness 10 :contrast 20 :gamma 1.5 :saturation -30})]
+        o (pipeline/render i {:exposure 0.2 :contrast 0.2 :saturation -0.3})]
     (is (not= (first-px i) (first-px o)))
-    (is (identical? i (pipeline/render i {:gamma 1.0 :contrast 0})))))
+    (is (identical? i (pipeline/render i {:contrast 0.0 :aspect "orig"})))))

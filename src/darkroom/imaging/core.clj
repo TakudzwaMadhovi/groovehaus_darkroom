@@ -41,7 +41,7 @@
 (defn- pack ^long [^long a ^long r ^long g ^long b]
   (bit-or a (bit-shift-left r 16) (bit-shift-left g 8) b))
 
-(defn- parallel-ranges!
+(defn parallel-ranges!
   "Calls (f start end) over [0,n) split across the available cores, blocking
   until all finish. Small inputs run inline."
   [^long n f]
