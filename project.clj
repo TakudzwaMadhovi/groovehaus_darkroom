@@ -31,6 +31,7 @@
                  ~['org.openjfx/javafx-base javafx-version :classifier javafx-platform]
                  ~['org.openjfx/javafx-graphics javafx-version :classifier javafx-platform]
                  ~['org.openjfx/javafx-controls javafx-version :classifier javafx-platform]
+                 [com.drewnoakes/metadata-extractor "2.19.0"] ; EXIF orientation
                  [org.bytedeco/javacpp ~bytedeco-version]
                  ~['org.bytedeco/javacpp bytedeco-version :classifier bytedeco-platform]
                  [org.bytedeco/libraw ~libraw-version]
@@ -41,4 +42,6 @@
   ;; with JavaFX on macOS. Heap capped for 8 GB machines.
   :jvm-opts ["-Djava.awt.headless=true" "-Xmx2g"]
   :global-vars {*warn-on-reflection* true}
-  :profiles {:uberjar {:aot :all}})
+  :profiles {:uberjar {:aot :all}
+             ;; test helpers use plain interop for brevity
+             :test   {:global-vars {*warn-on-reflection* false}}})

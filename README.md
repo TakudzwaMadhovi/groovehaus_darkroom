@@ -23,6 +23,7 @@ JavaFX natives are picked automatically per OS/arch (see `project.clj`).
 | `darkroom.imaging.raw` | LibRaw (Bytedeco) RAW decoding: `decode-linear` -> 16-bit linear RGB, `linear->display` -> sRGB 8-bit. |
 | `darkroom.imaging.loader` | `load-image`: RAW files via LibRaw, everything else via ImageIO. |
 | `darkroom.imaging.browser` | `scan` (images in a folder, natural order) and `thumbnail`. |
+| `darkroom.imaging.exif` | EXIF orientation reader (metadata-extractor); `core/orient` applies it. |
 | `darkroom.imaging.pipeline` | Registry mapping settings (`{:brightness 20}`) to operations. |
 | `darkroom.ui.histogram-view` | Canvas that draws histogram data. |
 | `darkroom.ui.export-dialog` | Dialog for folder, file name, format, quality. |
@@ -52,4 +53,4 @@ JavaFX natives are picked automatically per OS/arch (see `project.clj`).
 
 ## File browser
 
-The left sidebar lists the images in the open image's folder (**Open Folder…** switches folders; sub-folders are not scanned). Click a thumbnail, or use the Up/Down arrow keys, to open it; sliders reset for each image. Thumbnails load only for rows scrolled into view, on a background thread, and the last 400 are cached in memory. Dot-files (including macOS `._` files) are ignored. Rapid navigation drops stale loads, so only the last-selected image is opened.
+The left sidebar lists the images in the open image's folder (**Open Folder…** switches folders; sub-folders are not scanned). Click a thumbnail, or use the Up/Down arrow keys, to open it; sliders reset for each image. Thumbnails load only for rows scrolled into view, on a background thread, and the last 400 are cached in memory. Dot-files (including macOS `._` files) are ignored. JPEG/PNG/TIFF thumbnails and the main view honour the EXIF orientation tag (phone photos display upright); RAW thumbnails use the camera's embedded JPEG preview when it is at least 176 px, otherwise a half-size decode. Rapid navigation drops stale loads, so only the last-selected image is opened.

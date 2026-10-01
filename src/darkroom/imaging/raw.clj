@@ -8,7 +8,10 @@
   unsigned 16-bit value (read it with (bit-and s 0xFFFF)) proportional to
   scene light: gamma 1.0, sRGB/Rec. 709 primaries, camera white balance
   applied, no automatic brightening."
-  (:import (java.nio ByteOrder)
+  (:require [darkroom.imaging.core :as core])
+  (:import (java.io ByteArrayInputStream)
+           (java.nio ByteOrder)
+           (javax.imageio ImageIO)
            (org.bytedeco.javacpp BytePointer)
            (org.bytedeco.libraw libraw_data_t libraw_output_params_t libraw_processed_image_t)
            (org.bytedeco.libraw.global LibRaw)))
@@ -108,3 +111,33 @@
   "RAW file -> display image map (decode, then sRGB-encode)."
   [path & [opts]]
   (linear->display (decode-linear path opts)))
+
+(def ^:private libraw-flip->exif
+  "LibRaw's `flip` (0 none, 3 = 180, 5 = 90 CCW, 6 = 90 CW) as an EXIF orientation."
+  {3 3, 5 8, 6 6})
+
+(defn embedded-thumbnail
+  "The camera's embedded JPEG preview, upright, as an image map; nil if the
+  file has none, it is not a JPEG, or its longest side is below `min-side`.
+  Far faster than a full decode: no demosaicing. Useful for thumbnails."
+  [path min-side]
+  (let [^libraw_data_t lr (or (LibRaw/libraw_init 0) (throw (ex-info "LibRaw init failed" {})))]
+    (try
+      (when (and (zero? (LibRaw/libraw_open_file lr (str path)))
+                 (zero? (LibRaw/libraw_unpack_thumb lr)))
+        (let [t   (.thumbnail lr)
+              len (.tlength t)]
+          ;; Identify JPEG by its magic bytes (FF D8) rather than `tformat`: the
+          ;; enum read through JavaCPP was unreliable, and ImageIO needs a JPEG anyway.
+          (when (> len 2)
+            (let [bytes (byte-array len)
+                  ^BytePointer p (.thumb t)]
+              (.get (.capacity p len) bytes)
+              (when-let [buf (when (and (= -1 (aget bytes 0)) (= -40 (aget bytes 1)))
+                               (ImageIO/read (ByteArrayInputStream. bytes)))]
+                (let [img (core/orient (core/from-buffered buf)
+                                       (libraw-flip->exif (.flip (.sizes lr))))]
+                  (when (>= (long (max (long (:width img)) (long (:height img)))) (long min-side))
+                    img)))))))
+      (catch Exception _ nil)
+      (finally (LibRaw/libraw_close lr)))))

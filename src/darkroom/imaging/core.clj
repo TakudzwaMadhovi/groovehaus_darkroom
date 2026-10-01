@@ -144,3 +144,26 @@
                         y (bit-shift-right (+ (* 54 r) (* 183 g) (* 19 b)) 8)
                         mix (fn ^long [^long c] (clamp (+ y (bit-shift-right (* (- c y) s) 8))))]
                     (pack (alpha p) (mix r) (mix g) (mix b)))))))
+
+(defn orient
+  "Rotates/mirrors `img` according to an EXIF orientation value (1-8) so it
+  displays upright. 1 (or anything unknown) returns `img` unchanged.
+    2 mirror horizontally  3 rotate 180      4 mirror vertically
+    5 transpose            6 rotate 90 CW    7 transverse     8 rotate 90 CCW"
+  [{:keys [^long width ^long height pixels] :as img} orientation]
+  (let [o (long (or orientation 1))]
+    (if-not (<= 2 o 8)
+      img
+      (let [^ints src pixels
+            swap? (>= o 5)
+            dw (if swap? height width)
+            dh (if swap? width height)
+            ^ints out (int-array (* dw dh))]
+        (dotimes [y dh]
+          (dotimes [x dw]
+            (let [sx (case o 2 (- width 1 x), 3 (- width 1 x), 4 x,
+                       5 y, 6 y, 7 (- width 1 y), 8 (- width 1 y))
+                  sy (case o 2 y, 3 (- height 1 y), 4 (- height 1 y),
+                       5 x, 6 (- height 1 x), 7 (- height 1 x), 8 x)]
+              (aset out (+ (* y dw) x) (aget src (+ (* sy width) sx))))))
+        (image dw dh out)))))

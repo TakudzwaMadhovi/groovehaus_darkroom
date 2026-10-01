@@ -3,6 +3,7 @@
   I/O, no UI dependency."
   (:require [clojure.string :as str]
             [darkroom.imaging.core :as core]
+            [darkroom.imaging.exif :as exif]
             [darkroom.imaging.raw :as raw])
   (:import (java.io File)
            (javax.imageio ImageIO)))
@@ -71,11 +72,12 @@
 
 (defn thumbnail
   "Returns an image map whose longest side is at most `max-side`.
-  RAW files use LibRaw's fast half-size decode; other formats use a
-  subsampled read."
+  RAW files use the embedded JPEG preview when it is large enough, else
+  LibRaw's fast half-size decode; other formats use a subsampled read, then the EXIF orientation is applied."
   [file max-side]
   (let [f (File. (str file))
         img (if (raw/raw-file? f)
-              (raw/load-image f {:half-size? true :quality 0})
-              (read-subsampled f max-side))]
+              (or (raw/embedded-thumbnail f max-side)
+                  (raw/load-image f {:half-size? true :quality 0}))
+              (core/orient (read-subsampled f max-side) (exif/orientation f)))]
     (core/fit img max-side)))

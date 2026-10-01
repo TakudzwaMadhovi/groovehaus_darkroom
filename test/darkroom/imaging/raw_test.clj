@@ -1,7 +1,10 @@
 (ns darkroom.imaging.raw-test
   "Decodes a synthetic DNG (see darkroom.dng) with LibRaw into linear RGB."
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.string :as str]
             [darkroom.dng :refer [write-dng!]]
+            [darkroom.imaging.core :as core]
+            [darkroom.imaging.export :as export]
             [darkroom.imaging.loader :as loader]
             [darkroom.imaging.raw :as raw])
   (:import (java.io File)))
@@ -47,3 +50,40 @@
     (.deleteOnExit bad)
     (spit bad "not a raw file")
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Cannot (open|unpack)" (raw/decode-linear bad)))))
+
+(defn- red-over-blue-jpeg
+  "120x80 JPEG: top half red, bottom half blue."
+  ^bytes []
+  (let [w 120 h 80 px (int-array (* w h))]
+    (dotimes [y h] (dotimes [x w] (aset px (+ (* y w) x) (unchecked-int (if (< y 40) 0xFFFF0000 0xFF0000FF)))))
+    (let [f (File/createTempFile "thumb" ".jpg")]
+      (.deleteOnExit f)
+      (export/save! (core/image w h px)
+                                     {:dir (str (.getParent f)) :name (str/replace (.getName f) #"\.jpg$" "") :format :jpeg :quality 1.0})
+      (java.nio.file.Files/readAllBytes (.toPath f)))))
+
+(defn- dom [p] (if (> (bit-and (unsigned-bit-shift-right p 16) 0xFF) (bit-and p 0xFF)) :red :blue))
+(defn- at [img x y] (aget ^ints (:pixels img) (+ (* y (:width img)) x)))
+
+(deftest embedded-thumbnail-extraction
+  (testing "a DNG without a preview yields nil"
+    (is (nil? (raw/embedded-thumbnail (write-dng! 64 48 20000) 32))))
+  (let [jpg (red-over-blue-jpeg)
+        f   (write-dng! 64 48 20000 {:thumb jpg :thumb-size [120 80]})]
+    (testing "the embedded JPEG is returned at its own size"
+      (let [t (raw/embedded-thumbnail f 64)]
+        (is (= [120 80] [(:width t) (:height t)]))
+        (is (= :red (dom (at t 60 10))))
+        (is (= :blue (dom (at t 60 70))))))
+    (testing "too-small previews are rejected so callers can fall back"
+      (is (nil? (raw/embedded-thumbnail f 400))))
+    (testing "the raw data still decodes beside the preview"
+      (is (= [64 48] (let [i (raw/decode-linear f)] [(:width i) (:height i)]))))))
+
+(deftest embedded-thumbnail-respects-orientation
+  (let [f (write-dng! 64 48 20000 {:thumb (red-over-blue-jpeg) :thumb-size [120 80] :orientation 6})
+        t (raw/embedded-thumbnail f 64)]
+    (testing "orientation 6 (rotate 90 CW) turns 120x80 into 80x120, red now on the right"
+      (is (= [80 120] [(:width t) (:height t)]))
+      (is (= :blue (dom (at t 10 60))))
+      (is (= :red (dom (at t 70 60)))))))
