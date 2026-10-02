@@ -31,7 +31,8 @@
 (defn renderer
   "Returns (fn [stack]) -> BufferedImage for a fixed source. Keeps the intermediate buffer
   after every layer, so editing layer k only re-renders layers k..n (slider drags on the top
-  look cost one look, not the whole stack). Not thread-safe; use one per editor session."
+  look cost one look, not the whole stack). Holds one full buffer per layer (~12 B/px), so use it
+  on preview-sized images. Not thread-safe; use one per editor session."
   [^BufferedImage src]
   (let [base (buffer/->buffer src)
         cache (atom [])]

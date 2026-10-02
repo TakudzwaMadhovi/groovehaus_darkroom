@@ -180,7 +180,7 @@
                   f (clamp01 (- 1.0 (/ (Math/sqrt (+ (* dx dx) (* dy dy))) r)))
                   a (* f f)
                   ;; rim -> core colour gradient
-                  lr (* a (+ cr (* f 0.0)))
+                  lr (* a cr)
                   lg (* a (+ (* cg 0.3) (* f 0.7 cg)))
                   lb (* a (+ (* cb 0.6) (* f 0.4 cb)))
                   i (* 3 (+ (* y w) x))]
