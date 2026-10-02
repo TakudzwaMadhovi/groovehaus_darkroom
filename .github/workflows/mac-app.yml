@@ -10,7 +10,7 @@ jobs:
       matrix:
         include:
           - {os: macos-14, name: apple-silicon}   # arm64
-          - {os: macos-13, name: intel}           # x86_64
+          - {os: macos-15-intel, name: intel}      # x86_64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
