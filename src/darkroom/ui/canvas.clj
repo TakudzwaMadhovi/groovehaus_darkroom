@@ -43,6 +43,13 @@
              {:order (vec (drop drop-n order))
               :frames (apply dissoc (assoc frames path sess) gone)}))))
 
+(defn clear-cache!
+  "Forgets every loaded frame and its cached renders (frames reload on demand).
+  Used by the dev reloader after engine code changes."
+  []
+  (reset! loaded {:order [] :frames {}})
+  (reset! loading #{}))
+
 (defn session [path] (get-in @loaded [:frames path]))
 
 (defn frame-aspect

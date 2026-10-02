@@ -21,7 +21,12 @@
   "Registers the bundled fonts with JavaFX (idempotent). FX thread or startup."
   [] @fonts)
 
-(defn stylesheet-url [] (str (io/resource "darkroom.css")))
+(defonce css-version
+  ;; Set by the dev reloader so JavaFX re-reads the stylesheet instead of using its cache.
+  (atom nil))
+
+(defn stylesheet-url []
+  (str (io/resource "darkroom.css") (when-let [v @css-version] (str "?v=" v))))
 
 (def ^:private spacing
   {:tight  " "          ; ~0.1em  (tracking .12-.14em)

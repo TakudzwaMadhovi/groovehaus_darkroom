@@ -199,6 +199,20 @@
       (refresh! {} @st/state))
     scene))
 
+(defonce ^:private stage* (atom nil))
+
+(defn rebuild!
+  "Development aid: rebuilds the whole window from the current state, keeping the
+  window's size and position and all application state. Used after code or
+  stylesheet reloads (see dev/darkroom/dev.clj). Safe to call from any thread."
+  []
+  (Platform/runLater
+    (fn []
+      (when-let [^Stage stage @stage*]
+        (let [w (.getWidth stage) h (.getHeight stage) x (.getX stage) y (.getY stage)]
+          (.setScene stage (build-scene))
+          (.setX stage x) (.setY stage y) (.setWidth stage w) (.setHeight stage h))))))
+
 (defn show!
   "Starts the toolkit if needed and shows the main window."
   [{:keys [file]}]
@@ -207,6 +221,7 @@
                       scene (build-scene)
                       stage (doto (Stage.) (.setTitle "Groovehaus Darkroom") (.setScene scene)
                               (.setMinWidth 900) (.setMinHeight 620))]
+                  (reset! stage* stage)
                   (.setOnCloseRequest stage (w/handler (fn [_] (st/save-now!))))
                   (st/load-catalog!)
                   (when file (st/open-file! file))

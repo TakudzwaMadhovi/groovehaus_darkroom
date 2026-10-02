@@ -52,5 +52,9 @@
   :jvm-opts ["-Djava.awt.headless=true" "-XX:MaxRAMPercentage=60"]
   :global-vars {*warn-on-reflection* true}
   :profiles {:uberjar {:aot :all}
+             ;; live-reload loop: scripts/dev-mac.sh (see README)
+             :dev    {:source-paths ["dev"]
+                      :dependencies [[org.clojure/tools.namespace "1.5.1"]]
+                      :repl-options {:init-ns darkroom.dev}}
              ;; test helpers use plain interop for brevity
              :test   {:global-vars {*warn-on-reflection* false}}})

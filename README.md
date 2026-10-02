@@ -23,6 +23,31 @@ Edits are non-destructive; the catalog (shoots, ratings, adjustments, history)
 is stored as EDN in the per-user data folder
 (`~/Library/Application Support/Groovehaus Darkroom/catalog.edn` on macOS).
 
+## Developing locally (no GitHub round trip)
+
+Everything builds and runs on your own Mac, Intel or Apple silicon; CI is only a
+second opinion. One-time setup: `brew install --cask temurin@21 && brew install leiningen`.
+
+    ./scripts/dev-mac.sh               # run with live reload
+    ./scripts/dev-mac.sh photo.jpg     # ... opening that photo in Develop
+    ./scripts/dev-mac.sh repl          # REPL with the reload helpers (darkroom.dev)
+    ./scripts/dev-mac.sh test          # test suite
+    ./scripts/dev-mac.sh package       # build "Groovehaus Darkroom-<version>.dmg" into dist/
+
+With live reload, save a file under `src/` and the window updates in place: the
+changed namespaces and everything that requires them are reloaded (dependencies
+first), caches are cleared and the window is rebuilt. Save `resources/darkroom.css`
+and only the stylesheet is re-read. The catalog, the open photo, the tab and the
+window position survive, so you keep your place. UI-only changes take a fraction
+of a second; changing engine code reloads about twenty namespaces (1.4 s on a
+4-core Linux box). If a save doesn't compile, the old code keeps running, the
+terminal shows the error and the window shows a toast; fix it and save again.
+`./scripts/dev-mac.sh package` builds the same unsigned `.dmg` CI does.
+
+The loop lives in `dev/darkroom/dev.clj` (the `:dev` profile only, never in the
+packaged app). It reloads Clojure code, not Java: a change to `project.clj`
+(dependencies, JVM options) needs a restart.
+
 ## Views
 
 - **Library**: shoots sidebar (`NEW +`), filters ALL / PICKS / EDITED / REJECTED, search
