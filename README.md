@@ -299,3 +299,10 @@ The tone maths was moved from the design reference's 8-bit gamma-space engine to
 pipeline above, so exposure and temperature no longer match the reference pixel for pixel
 (the reference multiplied encoded values; exposure is now real light) and the presets look
 slightly different from the prototype.
+
+## Mac app
+
+`scripts/package-mac.sh` (run on a Mac with JDK 21 and Leiningen) builds `dist/Groovehaus Darkroom-<version>.dmg`.
+The workflow `.github/workflows/mac-app.yml` does the same on GitHub for Apple silicon and Intel and uploads the
+`.dmg` as a build artifact. The app is not code-signed: on first launch right-click it and choose Open (or run
+`xattr -dr com.apple.quarantine "/Applications/Groovehaus Darkroom.app"`).
