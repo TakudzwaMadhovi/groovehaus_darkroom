@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 [ "$(uname)" = "Darwin" ] || { echo "run this on macOS"; exit 1; }
 
-VERSION="${VERSION:-0.1.0}"
+VERSION="${VERSION:-1.0.0}"
 OUT=dist; rm -rf "$OUT" target/icon.iconset target/icon.icns; mkdir -p "$OUT"
 
 lein uberjar
