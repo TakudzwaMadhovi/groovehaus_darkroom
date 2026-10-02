@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Groovehaus Darkroom</title>
+<style>
+  :root { --bg:#0a0a0a; --panel:#161413; --bone:#f2e9d5; --dim:rgba(242,233,213,.6); --sun:#e9b547; --line:rgba(242,233,213,.18); }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin:0; background:var(--bg); color:var(--bone); font:16px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { position:sticky; top:0; z-index:5; display:flex; align-items:center; gap:12px; padding:12px 16px; background:rgba(10,10,10,.92); border-bottom:1px solid var(--line); }
+  header h1 { margin:0; font-size:15px; letter-spacing:.18em; text-transform:uppercase; flex:1; }
+  button { font:inherit; color:var(--bone); background:transparent; border:1px solid var(--line); border-radius:999px; padding:10px 16px; min-height:44px; }
+  button.on { border-color:var(--sun); color:var(--sun); }
+  button:focus-visible, a:focus-visible { outline:2px solid var(--bone); outline-offset:2px; }
+  main { padding:12px 12px 96px; }
+  .list a { display:flex; justify-content:space-between; padding:16px 8px; border-bottom:1px solid var(--line); color:var(--bone); text-decoration:none; }
+  .list a span:last-child { color:var(--dim); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(104px, 1fr)); gap:8px; }
+  .tile { position:relative; aspect-ratio:1; background:var(--panel); border-radius:6px; overflow:hidden; padding:0; border:0; }
+  .tile img { width:100%; height:100%; object-fit:cover; display:block; }
+  .tile.rej img { opacity:.35; }
+  .tile .meta { position:absolute; left:0; right:0; bottom:0; padding:3px 6px; font-size:11px; background:linear-gradient(transparent, rgba(0,0,0,.8)); display:flex; justify-content:space-between; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+  .viewer { position:fixed; inset:0; background:var(--bg); display:flex; flex-direction:column; z-index:10; }
+  .viewer .stage { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; touch-action:pan-y; }
+  .viewer img { max-width:100%; max-height:100%; object-fit:contain; }
+  .viewer .bar { padding:10px 12px calc(10px + env(safe-area-inset-bottom)); border-top:1px solid var(--line); background:var(--panel); display:flex; flex-direction:column; gap:10px; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:center; }
+  .row button { padding:8px 14px; }
+  .swatch { width:44px; height:44px; padding:0; border-radius:50%; border-width:3px; }
+  #msg { color:var(--dim); text-align:center; padding:40px 12px; }
+</style>
+</head>
+<body>
+<header><button id="back" hidden aria-label="Back">‹</button><h1 id="title">Groovehaus Darkroom</h1></header>
+<main id="main"><p id="msg">Loading…</p></main>
+<script>
+"use strict";
+const COLOURS = {red:"#d9534f", yellow:"#e9b547", green:"#5cb85c", blue:"#4a90d9", purple:"#9b6bd6"};
+const $ = s => document.querySelector(s);
+const main = $("#main"), title = $("#title"), back = $("#back");
+let shoot = null, frames = [], cur = -1, backTo = null;
+
+async function api(path, body) {
+  const opt = body ? {method:"POST", headers:{"X-Requested-With":"gh", "Content-Type":"application/x-www-form-urlencoded"}, body:new URLSearchParams(body)} : {};
+  const r = await fetch(path, opt);
+  if (!r.ok) throw new Error(r.status === 403 ? "Not authorised: open the address shown in the editor again." : "Server said " + r.status);
+  return r.json();
+}
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) { if (k === "class") e.className = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v); }
+  for (const kid of kids) e.append(kid);
+  return e;
+}
+function show(node) { main.replaceChildren(node); }
+function fail(e) { show(el("p", {id:"msg"}, e.message || String(e))); }
+
+async function shoots() {
+  shoot = null; title.textContent = "Shoots"; back.hidden = true; backTo = null;
+  try {
+    const list = await api("/api/shoots");
+    if (!list.length) return show(el("p", {id:"msg"}, "No shoots yet. Import photos in the editor."));
+    show(el("div", {class:"list"}, ...list.map(s => el("a", {href:"#", onclick:ev => { ev.preventDefault(); openShoot(s); }}, el("span", {}, s.name), el("span", {}, s.count + " frames")))));
+  } catch (e) { fail(e); }
+}
+async function openShoot(s) {
+  shoot = s; title.textContent = s.name; back.hidden = false; backTo = shoots;
+  try {
+    frames = await api("/api/shoot/" + s.id);
+    if (!frames.length) return show(el("p", {id:"msg"}, "This shoot is empty."));
+    show(el("div", {class:"grid"}, ...frames.map((f, i) => tile(f, i))));
+  } catch (e) { fail(e); }
+}
+function tile(f, i) {
+  const meta = el("div", {class:"meta"}, el("span", {}, f.colour ? dot(f.colour) : "", f.name), el("span", {}, "★".repeat(f.rating)));
+  const b = el("button", {class:"tile" + (f.reject ? " rej" : ""), "aria-label":f.name + ", " + f.rating + " stars" + (f.reject ? ", rejected" : ""), onclick:() => view(i)},
+               el("img", {src:"/api/thumb/" + f.id, alt:"", loading:"lazy"}), meta);
+  return b;
+}
+function dot(c) { const d = el("i", {class:"dot"}); d.style.background = COLOURS[c]; return d; }
+
+function view(i) {
+  cur = i; const f = frames[i];
+  const v = el("div", {class:"viewer", role:"dialog", "aria-label":f.name});
+  const img = el("img", {alt:f.name, src:"/api/preview/" + f.id});
+  const stage = el("div", {class:"stage"}, img);
+  const stars = el("div", {class:"row"}, ...[0,1,2,3,4,5].map(n => el("button", {class:f.rating === n ? "on" : "", "aria-label":n + " stars", onclick:() => update(f, {rating:n}, v)}, n ? "★" + n : "–")));
+  const flags = el("div", {class:"row"},
+    el("button", {class:f.reject ? "on" : "", onclick:() => update(f, {reject:f.reject ? "0" : "1"}, v)}, f.reject ? "Rejected" : "Reject"),
+    ...Object.keys(COLOURS).map(c => { const b = el("button", {class:"swatch" + (f.colour === c ? " on" : ""), "aria-label":c + " label", onclick:() => update(f, {colour:f.colour === c ? "" : c}, v)}); b.style.background = COLOURS[c]; return b; }));
+  const nav = el("div", {class:"row"},
+    el("button", {onclick:() => step(-1, v)}, "‹ Prev"), el("span", {}, (i + 1) + " / " + frames.length), el("button", {onclick:() => step(1, v)}, "Next ›"),
+    el("button", {onclick:() => v.remove()}, "Close"));
+  v.append(el("div", {class:"row", style:"padding:8px 12px"}, el("strong", {}, f.name)), stage, el("div", {class:"bar"}, stars, flags, nav));
+  let x0 = null;
+  stage.addEventListener("touchstart", e => { x0 = e.touches[0].clientX; }, {passive:true});
+  stage.addEventListener("touchend", e => { if (x0 === null) return; const dx = e.changedTouches[0].clientX - x0; x0 = null; if (Math.abs(dx) > 60) step(dx < 0 ? 1 : -1, v); });
+  document.body.append(v);
+}
+function step(d, v) { const n = (cur + d + frames.length) % frames.length; v.remove(); view(n); }
+async function update(f, change, v) {
+  try {
+    Object.assign(f, await api("/api/frame/" + f.id, change));
+    v.remove(); view(cur);
+    if (shoot) { const g = main.querySelector(".grid"); if (g) g.replaceChildren(...frames.map((x, i) => tile(x, i))); }
+  } catch (e) { alert(e.message); }
+}
+back.addEventListener("click", () => backTo && backTo());
+shoots();
+</script>
+</body>
+</html>

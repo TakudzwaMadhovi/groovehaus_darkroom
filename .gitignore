@@ -1,2 +1,5 @@
-.cpcache/
-.clj-kondo/.cache/
+target/
+.lein-*
+.nrepl-port
+*.jar
+hs_err_pid*.log
