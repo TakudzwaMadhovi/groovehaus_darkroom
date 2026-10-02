@@ -55,7 +55,7 @@
     return `<div class="sl"><div class="r"><button data-a="reset" data-v="${k}" title="Click to reset">${label}</button><span id="v-${k}" class="${ch ? 'ch' : ''}">${disp(k)}</span></div><div class="w">${min < 0 ? '<span class="tick"></span>' : ''}<input class="gh-range" data-f="s-${k}" data-k="${k}" type="range" min="${min}" max="${max}" step="${step}" value="${v}" style="background:${track(k)}" aria-label="${label}"></div></div>`; };
 
   /* ---------- views ---------- */
-  const seg = (items, cls = '') => `<div class="seg ${cls}">${items.map(([a, v, l, on]) => `<button data-a="${a}" data-v="${v}" class="${on ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+  const seg = (items, cls = '') => `<div class="seg ${cls}">${items.map(([a, v, l, on]) => `<button data-a="${a}" data-v="${v}" class="${on ? 'on' : ''}" aria-pressed="${!!on}">${l}</button>`).join('')}</div>`;
   const header = () => `<header><div class="brand"><img src="assets/logo-medallion-white.png" alt=""><span><b>GROOVEHAUS</b><i>darkroom</i></span></div>
     ${seg([['view', 'library', 'Library', S.view === 'library'], ['view', 'develop', 'Develop', S.view === 'develop']])}
     <div class="hr"><button class="sb o" data-a="import">Import <span class="kbd">⌘I</span></button><button class="sb p" data-a="export">Export ↓ <span class="kbd">⌘E</span></button></div></header>`;
@@ -64,10 +64,10 @@
     const sp = inShoot().map(i => ({ q: S.photos[i], i })), picks = sp.filter(x => x.q.rating === 5), ed = sp.filter(x => isEd(x.q));
     const vis = sp.filter(({ q }) => S.lf === 'all' || (S.lf === 'picks' ? q.rating === 5 : isEd(q)));
     const sh = S.shoots.find(x => x.id === S.shoot);
-    const tiles = vis.map(({ q, i }) => `<div class="tile ${i === S.cur ? 'on' : ''}" data-a="select" data-v="${i}" data-dbl="${i}"><div class="im"><img src="${thumbs[q.id] || BLANK}" alt="" draggable="false"><div class="star ${q.rating === 5 ? 'on' : ''}" role="button" aria-label="Pick frame" title="Pick (5 stars)" data-a="pick" data-v="${i}">${q.rating === 5 ? '★' : '☆'}</div>${isEd(q) ? '<span class="badge">Edited</span>' : ''}</div><div class="nm"><b>${esc(q.name)}</b><span>${'★'.repeat(q.rating)}</span></div></div>`).join('');
+    const tiles = vis.map(({ q, i }) => `<div class="tile ${i === S.cur ? 'on' : ''}" role="button" tabindex="0" data-f="t-${i}" aria-label="${esc(q.name)}${isEd(q) ? ', edited' : ''}${q.rating ? ', ' + q.rating + ' stars' : ''}. Enter to develop" aria-pressed="${i === S.cur}" data-a="select" data-v="${i}" data-dbl="${i}"><div class="im"><img src="${thumbs[q.id] || BLANK}" alt="" draggable="false" loading="lazy" decoding="async"><button class="star ${q.rating === 5 ? 'on' : ''}" aria-label="Pick ${esc(q.name)}" aria-pressed="${q.rating === 5}" title="Pick (5 stars)" data-a="pick" data-v="${i}">${q.rating === 5 ? '★' : '☆'}</button>${isEd(q) ? '<span class="badge">Edited</span>' : ''}</div><div class="nm"><b>${esc(q.name)}</b><span>${'★'.repeat(q.rating)}</span></div></div>`).join('');
     const empty = sp.length === 0 ? 'this shoot is empty — import frames to begin.' : vis.length === 0 ? 'nothing here — star a frame or change the filter.' : '';
     return `<main><aside><div class="sh-h"><span class="lbl">SHOOTS</span><button class="sm o" data-a="newshoot" title="New shoot">+ New</button></div>
-      ${S.adding ? `<div class="newf"><input data-f="newname" placeholder="Name this shoot" value="${esc(S.newName)}"><div><button class="sm" data-a="create">Create ↵</button><button class="sm" style="color:var(--dim)" data-a="cancel">Cancel</button></div></div>` : ''}
+      ${S.adding ? `<div class="newf" role="group" aria-label="New shoot"><input data-f="newname" aria-label="Shoot name" maxlength="28" placeholder="Name this shoot" value="${esc(S.newName)}"><div><button class="sm" data-a="create">Create ↵</button><button class="sm" style="color:var(--dim)" data-a="cancel">Cancel</button></div></div>` : ''}
       <div class="shl">${S.shoots.map(s => { const ps = S.photos.filter(q => q.shoot === s.id); return `<button class="sh ${s.id === S.shoot ? 'on' : ''}" data-a="shoot" data-v="${s.id}"><div class="cv"><img src="${ps[0] ? thumbs[ps[0].id] || BLANK : BLANK}" alt=""></div><div><b>${esc(s.name)}</b><span>${ps.length} ${ps.length === 1 ? 'frame' : 'frames'}</span></div></button>`; }).join('')}</div>
       <div class="cap">one folder per shoot. open it, pick, then develop.</div></aside>
     <section><div class="tb"><div class="t"><h1>${esc(sh.name)}</h1><div>${sp.length} frames · ${ed.length} edited · ${picks.length} picks</div></div>
@@ -88,28 +88,28 @@
       const L = GH.lut(adj.curve), path = Array.from({ length: 41 }, (_, i) => { const x = i / 40; return (i ? 'L' : 'M') + (x * 240).toFixed(1) + ' ' + ((1 - L[Math.round(x * 255)]) * 240).toFixed(1); }).join('');
       body += `<div class="curve"><svg id="curve" viewBox="-8 -8 256 256"><rect width="240" height="240" rx="6" fill="#F7F1E3" stroke="rgba(13,12,11,.18)"/><path d="M60 0V240M120 0V240M180 0V240M0 60H240M0 120H240M0 180H240" stroke="rgba(13,12,11,.08)" fill="none"/><path d="M0 240L240 0" stroke="rgba(13,12,11,.2)" stroke-dasharray="3 4" fill="none"/><path id="cpath" d="${path}" stroke="#0D0C0B" stroke-width="2" fill="none"/>${adj.curve.map((y, i) => `<circle class="cpt" cx="${i * 60}" cy="${(1 - y) * 240}" r="6" fill="#F7F1E3" stroke="#0D0C0B" stroke-width="2"/>`).join('')}</svg><p>Drag the points to shape tone.</p><button class="sm" data-a="creset">Reset curve</button></div>`;
     }
-    if (S.tab === 'crop') body += `<div class="lbl" style="padding-top:14px">ASPECT RATIO</div><div class="chips">${['orig', '1:1', '4:5', '3:2', '16:9'].map(a => `<button class="chip ${adj.aspect === a ? 'on' : ''}" data-a="aspect" data-v="${a}">${a === 'orig' ? 'Original' : a}</button>`).join('')}<button class="chip ${adj.flip ? 'on' : ''}" data-a="flip">Flip ↔</button></div>`;
+    if (S.tab === 'crop') body += `<div class="lbl" style="padding-top:14px">ASPECT RATIO</div><div class="chips">${['orig', '1:1', '4:5', '3:2', '16:9'].map(a => `<button class="chip ${adj.aspect === a ? 'on' : ''}" aria-pressed="${adj.aspect === a}" data-a="aspect" data-v="${a}">${a === 'orig' ? 'Original' : a}</button>`).join('')}<button class="chip ${adj.flip ? 'on' : ''}" aria-pressed="${adj.flip}" data-a="flip">Flip ↔</button></div>`;
     if (S.tab === 'presets') body += `<div class="presets">${GH.PRESETS.map(([n], i) => `<button data-a="preset" data-v="${i}">${n}</button>`).join('')}</div>`;
     if (S.tab === 'history') body += `<div class="hl">${p.history.map((h, i) => `<button class="${i === p.history.length - 1 ? 'on' : ''}" data-a="revert" data-v="${i}"><span>${String(i + 1).padStart(2, '0')}</span>${esc(h.label)}</button>`).reverse().join('')}</div>`;
     return `<div class="dev"><div><div class="stage"><canvas id="cv"></canvas>
       <div class="fbar"><button class="n" data-a="prev" aria-label="Previous frame" title="Previous (←)">‹</button><div class="nm"><b>${esc(p.name)}</b><span>${pos} of ${sp.length}</span></div><button class="n" data-a="next" aria-label="Next frame" title="Next (→)">›</button><span class="sp"></span>
-      <div style="display:flex">${[1, 2, 3, 4, 5].map(n => `<button class="st ${n <= p.rating ? 'on' : ''}" data-a="rate" data-v="${n}" aria-label="Rate ${n}">${n <= p.rating ? '★' : '☆'}</button>`).join('')}</div><span class="sp"></span>
-      <button class="ba ${S.before ? 'on' : ''}" data-a="before" title="Hold \\ to compare">${S.before ? 'Before' : 'After'} <span class="kbd">\\</span></button></div></div>
+      <div style="display:flex">${[1, 2, 3, 4, 5].map(n => `<button class="st ${n <= p.rating ? 'on' : ''}" aria-pressed="${n <= p.rating}" data-a="rate" data-v="${n}" aria-label="Rate ${n}">${n <= p.rating ? '★' : '☆'}</button>`).join('')}</div><span class="sp"></span>
+      <button class="ba ${S.before ? 'on' : ''}" aria-pressed="${S.before}" data-a="before" title="Hold \\ to compare">${S.before ? 'Before' : 'After'} <span class="kbd">\\</span></button></div></div>
       <div class="strip"><div class="sc">${sp.map(i => `<button class="${i === S.cur ? 'on' : ''}" data-a="frame" data-v="${i}" title="${esc(S.photos[i].name)}"><div class="th"><img src="${thumbs[S.photos[i].id] || BLANK}" alt=""></div></button>`).join('')}</div><span>${sp.length} frames · ${sp.filter(i => isEd(S.photos[i])).length} edited</span></div></div>
       <div class="panel" style="display:flex;flex-direction:column;min-height:0"><div class="hist"><canvas id="hv" width="640" height="160"></canvas></div>
-      <div class="tabs">${tabs.map(([id, l]) => `<button class="${S.tab === id ? 'on' : ''}" data-a="tab" data-v="${id}">${l}</button>`).join('')}</div>
+      <div class="tabs">${tabs.map(([id, l]) => `<button class="${S.tab === id ? 'on' : ''}" aria-pressed="${S.tab === id}" data-a="tab" data-v="${id}">${l}</button>`).join('')}</div>
       <div class="pb">${body}</div>
       <div class="pf"><span id="sum">${nEd ? nEd + (nEd === 1 ? ' adjustment' : ' adjustments') : 'No edits yet'}</span><button class="sb o" data-a="resetall" ${nEd ? '' : 'disabled'}>Reset all</button></div></div></div>`;
   }
 
   function exportDlg() {
-    const p = cur(), pill = (a, v, l, on) => `<button class="chip ${on ? 'on' : ''}" data-a="${a}" data-v="${v}">${l}</button>`;
-    return `<div class="scrim" data-a="closeexp"><div class="dlg" data-stop><div><div class="lbl" style="margin-bottom:6px">EXPORT</div><h2>${esc(p.name)}</h2></div>
+    const p = cur(), pill = (a, v, l, on) => `<button class="chip ${on ? 'on' : ''}" aria-pressed="${on}" data-a="${a}" data-v="${v}">${l}</button>`;
+    return `<div class="scrim" data-a="closeexp"><div class="dlg" data-stop role="dialog" aria-modal="true" aria-label="Export ${esc(p.name)}"><div><div class="lbl" style="margin-bottom:6px">EXPORT</div><h2>${esc(p.name)}</h2></div>
       <div><div class="f">Format</div><div class="row">${pill('fmt', 'jpeg', 'JPEG', S.fmt === 'jpeg')}${pill('fmt', 'png', 'PNG', S.fmt === 'png')}</div></div>
       <div><div class="f">Long edge</div><div class="row">${[[1080, '1080 PX'], [2048, '2048 PX'], [0, 'FULL RES']].map(([v, l]) => pill('size', v, l, S.size === v)).join('')}</div></div>
       ${S.fmt === 'jpeg' ? `<div><div style="display:flex;justify-content:space-between;margin-bottom:6px"><span class="f" style="margin:0">Quality</span><b id="qv">${S.q}</b></div><input class="gh-range" data-f="q" data-k="q" type="range" min="50" max="100" value="${S.q}" style="background:${trk((S.q - 50) / 50, 0)}" aria-label="Quality"></div>` : ''}
       <div class="fn">groovehaus_${esc(p.name.toLowerCase())}.${S.fmt === 'png' ? 'png' : 'jpg'}</div>
-      <div class="ft"><button class="sb" style="color:var(--dim)" data-a="closeexp">Cancel</button><button class="sb p" data-a="doexport">Export ↓</button></div></div></div>`;
+      <div class="ft"><button class="sb" style="color:var(--dim)" data-a="closeexp">Cancel</button><button class="sb p" data-f="doexport" data-a="doexport" ${S.busy ? 'disabled' : ''}>${S.busy ? 'Exporting…' : 'Export ↓'}</button></div></div></div>`;
   }
 
   /* ---------- render ---------- */
@@ -148,16 +148,17 @@
     S.view = 'library'; S.cur = first; save(); render(); S.photos.slice(first).forEach(getImg);
   }
   async function doExport() {
+    if (S.busy) return; S.busy = true; render(); await new Promise(r => setTimeout(r, 30));
     const p = cur(), img = await getImg(p), c = document.createElement('canvas'), png = S.fmt === 'png';
     GH.render(c, img, p.adj, S.size === 0 ? Infinity : S.size);
-    c.toBlob(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'groovehaus_' + p.name.toLowerCase() + (png ? '.png' : '.jpg'); a.click(); S.exporting = false; render(); }, png ? 'image/png' : 'image/jpeg', S.q / 100);
+    c.toBlob(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'groovehaus_' + p.name.toLowerCase() + (png ? '.png' : '.jpg'); a.click(); S.busy = false; S.exporting = false; render(); }, png ? 'image/png' : 'image/jpeg', S.q / 100);
   }
   const createShoot = () => { const n = S.newName.trim().toUpperCase().slice(0, 28); if (!n) return; const id = 's' + Date.now(); S.shoots.push({ id, name: n }); S.shoot = id; S.adding = false; S.newName = ''; S.lf = 'all'; save(); render(); };
 
   /* ---------- events ---------- */
   const A = {
     view: v => go(v), lf: v => { S.lf = v; render(); }, tab: v => { S.tab = v; render(); },
-    import: () => fileEl.click(), export: () => { if (cur()) { S.exporting = true; render(); } },
+    import: () => fileEl.click(), export: () => { if (cur()) { S.exporting = true; render(); const d = $('[data-f=doexport]'); if (d) d.focus(); } },
     closeexp: () => { S.exporting = false; render(); }, doexport: doExport,
     fmt: v => { S.fmt = v; render(); }, size: v => { S.size = +v; render(); },
     select: v => { S.cur = +v; document.querySelectorAll('.tile').forEach(t => t.classList.toggle('on', t.dataset.v === v)); const st = $('.status span'); if (st) st.firstChild.textContent = cur().name + ' · ' + inShoot().length + ' in shoot'; },
@@ -212,6 +213,8 @@
   // keyboard
   const onKey = (e, down) => {
     const t = e.target, tag = t?.tagName;
+    if (down && e.key === 'Enter' && t?.dataset?.dbl) { e.preventDefault(); go('develop', +t.dataset.dbl); return; }
+    if (down && e.key === ' ' && t?.dataset?.dbl) { e.preventDefault(); A.select(t.dataset.v); return; }
     if ((e.metaKey || e.ctrlKey) && down && (e.key === 'e' || e.key === 'i')) { e.preventDefault(); e.key === 'e' ? A.export() : fileEl.click(); return; }
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === '\\') { if (S.view === 'develop') { S.before = down; render(); } return; }
@@ -222,6 +225,7 @@
     else if (/^[0-5]$/.test(e.key) && cur()) { upd(q => ({ ...q, rating: +e.key === q.rating ? 0 : +e.key })); render(); }
     else if (e.key === 'g') go('library'); else if (e.key === 'd') go('develop'); else if (e.key === 'e') A.export();
     else if (e.key === 'Escape' && S.exporting) A.closeexp();
+    else if (e.key === 'Escape' && sp < 320) { sp = 320; drawSplash(); }
   };
   document.addEventListener('keydown', e => onKey(e, true));
   document.addEventListener('keyup', e => onKey(e, false));
@@ -245,7 +249,7 @@
     const pics = urls.length ? urls : S.photos.filter(q => thumbs[q.id]).slice(0, 5).map(q => thumbs[q.id]), idx = pics.length ? Math.floor(Math.max(0, sp - 3) / 60) % pics.length : -1;
     if (sig !== pics.join('|')) { // rebuild only when the photo set changes so crossfades keep running
       sig = pics.join('|');
-      splash.innerHTML = `<div class="splash" data-skip><div class="card"><div class="l"><img src="assets/logo-medallion-white.png" alt=""><div><h1>GROOVEHAUS</h1><em>darkroom</em></div><div><div class="bar"><div id="sbar"></div></div><div class="m"><span id="smsg"></span><span>Click to skip</span></div></div></div>
+      splash.innerHTML = `<div class="splash" data-skip role="status" aria-label="Loading Groovehaus Darkroom. Click or press Escape to skip."><div class="card"><div class="l"><img src="assets/logo-medallion-white.png" alt=""><div><h1>GROOVEHAUS</h1><em>darkroom</em></div><div><div class="bar"><div id="sbar"></div></div><div class="m"><span id="smsg"></span><span>Click to skip</span></div></div></div>
         <div class="r">${pics.map(s => `<div class="p"><img class="bg" src="${s}" alt=""><img class="fg" src="${s}" alt=""></div>`).join('')}</div></div></div>`;
     }
     splash.firstChild.style.opacity = sp >= 305 ? 0 : 1;
