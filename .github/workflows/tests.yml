@@ -1,0 +1,40 @@
+name: Tests
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main, claude/clever-curie-ys2709]
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-24.04,     name: linux-x86_64}
+          # No LibRaw natives exist for ARM64: RAW goes through dcraw_emu (libraw-bin).
+          - {os: ubuntu-24.04-arm, name: linux-arm64}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '21'}
+      - name: System packages (dcraw_emu, virtual display and the GTK/GL libraries JavaFX and OpenCV load)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libraw-bin xvfb libgtk-3-0t64 libgl1 libxtst6 libxxf86vm1 libxrender1 libxi6
+      - name: Install Leiningen
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -fsSL -o "$HOME/bin/lein" https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein
+          chmod +x "$HOME/bin/lein"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.m2
+          key: m2-${{ matrix.name }}-${{ hashFiles('project.clj') }}
+      - name: Which RAW decoder is in use
+        run: |
+          uname -m
+          lein run -m clojure.main -e "(require 'darkroom.imaging.raw) (println :backend (darkroom.imaging.raw/backend))"
+      - name: Test
+        run: xvfb-run -a lein test
