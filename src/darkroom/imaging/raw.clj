@@ -10,6 +10,7 @@
   applied, no automatic brightening."
   (:require [darkroom.imaging.camera :as camera]
             [darkroom.imaging.core :as core]
+            [darkroom.imaging.raw-cli :as cli]
             [darkroom.imaging.scene :as scene])
   (:import (java.io ByteArrayInputStream)
            (java.nio ByteOrder)
@@ -31,7 +32,26 @@
         i (.lastIndexOf n ".")]
     (and (pos? i) (contains? raw-extensions (subs n (inc i))))))
 
-(defn libraw-version [] (.getString (LibRaw/libraw_version)))
+(def ^:private native?
+  "True when the Bytedeco LibRaw natives load. They are not published for Linux
+  ARM64; there (or with DARKROOM_RAW_BACKEND=cli) decoding goes through
+  darkroom.imaging.raw-cli, which needs LibRaw's dcraw_emu installed."
+  (delay (and (not= "cli" (System/getenv "DARKROOM_RAW_BACKEND"))
+              (try (LibRaw/libraw_version) true
+                   (catch Throwable _ false)))))
+
+(defn native-available? [] @native?)
+
+(defn backend
+  "Which decoder is in use: :native, :cli (dcraw_emu), or nil when neither exists."
+  []
+  (cond @native? :native
+        (cli/available?) :cli))
+
+(defn libraw-version
+  "LibRaw's version string; nil when decoding goes through dcraw_emu, which does not report one."
+  []
+  (when @native? (.getString (LibRaw/libraw_version))))
 
 (defn- check! [^long rc what path]
   (when-not (zero? rc)
@@ -49,12 +69,8 @@
     (.user_qual (int (or quality 3))) ; 3 = AHD demosaic
     (.half_size (if half-size? 1 0))))
 
-(defn decode-linear
-  "Decodes the RAW file at `path` into a linear image (see ns docstring).
-  Options: :quality  demosaic algorithm 0-12 (0 linear, 2 PPG, 3 AHD default),
-           :half-size? true for a 2x-downsampled, much faster decode.
-  Throws ex-info with LibRaw's message for unreadable/unsupported files."
-  [path & [opts]]
+(defn- decode-native
+  [path opts]
   (let [^libraw_data_t lr (or (LibRaw/libraw_init 0)
                               (throw (ex-info "LibRaw init failed" {})))]
     (try
@@ -85,6 +101,14 @@
                                                          (mapv #(/ (double %) (double lo)) pm)))))
           (finally (LibRaw/libraw_dcraw_clear_mem img))))
       (finally (LibRaw/libraw_close lr)))))
+
+(defn decode-linear
+  "Decodes the RAW file at `path` into a linear image (see ns docstring).
+  Options: :quality  demosaic algorithm 0-12 (0 linear, 2 PPG, 3 AHD default),
+           :half-size? true for a 2x-downsampled, much faster decode.
+  Throws ex-info with LibRaw's message for unreadable/unsupported files."
+  [path & [opts]]
+  (if @native? (decode-native path opts) (cli/decode-linear path opts)))
 
 (defn- srgb-lut
   "65536-entry table: 16-bit linear value -> 8-bit sRGB-encoded value."
@@ -141,10 +165,7 @@
   "LibRaw's `flip` (0 none, 3 = 180, 5 = 90 CCW, 6 = 90 CW) as an EXIF orientation."
   {3 3, 5 8, 6 6})
 
-(defn embedded-thumbnail
-  "The camera's embedded JPEG preview, upright, as an image map; nil if the
-  file has none, it is not a JPEG, or its longest side is below `min-side`.
-  Far faster than a full decode: no demosaicing. Useful for thumbnails."
+(defn- embedded-thumbnail-native
   [path min-side]
   (let [^libraw_data_t lr (or (LibRaw/libraw_init 0) (throw (ex-info "LibRaw init failed" {})))]
     (try
@@ -166,3 +187,10 @@
                     img)))))))
       (catch Exception _ nil)
       (finally (LibRaw/libraw_close lr)))))
+
+(defn embedded-thumbnail
+  "The camera's embedded JPEG preview, upright, as an image map; nil if the
+  file has none, it is not a JPEG, or its longest side is below `min-side`.
+  Far faster than a full decode: no demosaicing. Useful for thumbnails."
+  [path min-side]
+  (if @native? (embedded-thumbnail-native path min-side) (cli/embedded-thumbnail path min-side)))

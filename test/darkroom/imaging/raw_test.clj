@@ -19,7 +19,9 @@
   (is (not (raw/raw-file? "dng"))))
 
 (deftest libraw-is-loaded
-  (is (re-find #"^0\.21" (raw/libraw-version))))
+  (is (some? (raw/backend)) "neither native LibRaw nor dcraw_emu is available")
+  (when (raw/native-available?)
+    (is (re-find #"^0\.21" (raw/libraw-version)))))
 
 (deftest decodes-synthetic-dng-to-linear-rgb
   (let [f   (write-dng! 64 48 16384)         ; 25% of full scale

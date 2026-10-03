@@ -19,6 +19,16 @@ Requires JDK 17+ and [Leiningen](https://leiningen.org).
     lein test
 
 JavaFX / OpenCV / LibRaw natives are chosen per OS in `project.clj`.
+
+**Linux ARM64:** supported, with two differences. JavaFX is 22.0.2 there (21.x has no
+linux-aarch64 build on Maven Central; it runs on JDK 17+). And Bytedeco publishes no LibRaw
+natives for ARM64, so RAW files are decoded by LibRaw's own `dcraw_emu` tool
+(`sudo apt install libraw-bin`, or set `DARKROOM_DCRAW_EMU` to its path). Results match the
+native decoder (same LibRaw, same options); it is slower because pixels pass through a pipe,
+and embedded previews are found by scanning the file for the largest JPEG. Without `dcraw_emu`
+installed, RAW files are reported as unreadable and everything else works.
+`DARKROOM_RAW_BACKEND=cli` forces this path on any platform. This path is tested on x86_64
+only; no ARM64 hardware was available.
 Edits are non-destructive; the catalog (shoots, ratings, adjustments, history)
 is stored as EDN in the per-user data folder
 (`~/Library/Application Support/Groovehaus Darkroom/catalog.edn` on macOS).
