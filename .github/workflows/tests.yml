@@ -18,10 +18,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: {distribution: temurin, java-version: '21'}
-      - name: System packages (dcraw_emu, virtual display and the GTK/GL libraries JavaFX and OpenCV load)
+      - name: System packages (dcraw_emu, virtual display and GTK 2 for OpenCV, GL for JavaFX)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libraw-bin xvfb libgtk-3-0t64 libgl1 libxtst6 libxxf86vm1 libxrender1 libxi6
+          sudo apt-get install -y libraw-bin xvfb libgtk2.0-0t64 libgl1 libxtst6 libxxf86vm1 libxrender1 libxi6
       - name: Install Leiningen
         run: |
           mkdir -p "$HOME/bin"
